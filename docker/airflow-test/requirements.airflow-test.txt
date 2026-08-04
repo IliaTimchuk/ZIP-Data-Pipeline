@@ -1,0 +1,10 @@
+pytest
+moto
+boto3
+PyYAML
+
+python-dotenv==1.0.1
+apache-airflow-providers-http
+apache-airflow-providers-apache-spark
+apache-airflow-providers-amazon
+mypy_boto3_s3==1.34.0

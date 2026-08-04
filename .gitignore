@@ -1,0 +1,15 @@
+.git
+.env
+
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+
+airflow.cfg
+airflow.db
+logs/
+minio_data/
+
+.idea/
+.vscode/

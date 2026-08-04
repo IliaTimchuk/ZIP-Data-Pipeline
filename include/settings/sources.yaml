@@ -1,0 +1,12 @@
+binance:
+  enabled: true
+  base_url: s3://data.binance.vision
+  dag_ids: 
+    - ingest_from_s3
+  endpoints:
+    - "data/futures/um/daily/trades/{symbol}/{symbol}-trades-{date}.zip"
+  keywords:
+    symbol:
+      - BTCUSDT
+      - ETHUSDT
+

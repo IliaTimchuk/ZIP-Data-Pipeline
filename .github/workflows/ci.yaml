@@ -1,0 +1,28 @@
+name: ci
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  test:
+    name: Run Pytest Suite
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Create dummy .env file
+        run: cp .env.example .env
+
+      - name: Build and Run Tests
+        run: |
+          docker compose run --rm airflow-tests
+
+      - name: Clean Up Stack
+        if: always()
+        run: |
+          docker compose down --volumes --remove-orphans
