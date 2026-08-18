@@ -25,13 +25,13 @@ def _disable_retries():
 
 
 @patch("airflow.providers.smtp.notifications.smtp.SmtpNotifier.notify")
-@patch("include.ingestion.read_sources.get_mapped_s3_sources")
+@patch("include.ingestion.read_sources.prepare_s3_sources")
 @patch("include.ingestion.read_sources.get_dag_sources")
 def test_smtp_notifier_fires_on_task_failure(
-    mock_get_dag_sources, mock_get_mapping, mock_notify, _disable_retries
+    mock_get_dag_sources, mock_prepare_s3_sources, mock_notify, _disable_retries
 ):
     mock_get_dag_sources.return_value = ({}, {})
-    mock_get_mapping.side_effect = RuntimeError("forced failure for test")
+    mock_prepare_s3_sources.side_effect = RuntimeError("forced failure for test")
 
     dag_run = ingestion_dag.test(
         logical_date=datetime(2026, 7, 29, tzinfo=timezone.utc)
@@ -42,17 +42,17 @@ def test_smtp_notifier_fires_on_task_failure(
 
 
 @patch("airflow.providers.smtp.notifications.smtp.SmtpNotifier.notify")
-@patch("include.ingestion.read_sources.get_mapped_s3_sources")
+@patch("include.ingestion.read_sources.prepare_s3_sources")
 @patch("include.ingestion.read_sources.get_dag_sources")
 def test_smtp_notifier_fires_on_malformed_sources(
-    mock_get_dag_sources, mock_get_mapping, mock_notify, _disable_retries
+    mock_get_dag_sources, mock_prepare_s3_sources, mock_notify, _disable_retries
 ):
     mock_get_dag_sources.return_value = (
         {"valid_source": {"base_url": "s3://ok", "endpoints": ["path"]}},
         {"malformed_source": ["Invalid scheme", "Missing base_url"]},
     )
 
-    mock_get_mapping.return_value = []
+    mock_prepare_s3_sources.return_value = []
 
     dag_run = ingestion_dag.test(
         logical_date=datetime(2026, 7, 29, tzinfo=timezone.utc)

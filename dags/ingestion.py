@@ -1,4 +1,4 @@
-import include.settings.pipeline_config as conf
+import include.ingestion.config.ingestion_config as conf
 from airflow.sdk import dag, task, task_group
 from airflow.providers.amazon.aws.sensors.s3 import S3KeySensor
 from airflow.providers.smtp.notifications.smtp import SmtpNotifier
@@ -27,12 +27,13 @@ def ingest_from_s3():
     def load_sources_config(**context) -> list[dict]:
         """
         Loads sources by dag_id from the sources configuration yaml file,
-        taking the date and the dag_id from the context to the parser function
-        (get_dag_sources). Processes the output to the format required by the
-        task_group (extract_files) to expand the tasks.
+        taking the date and the dag_id from the context to the parser function.
+        Processes the output to the format required by the task_group (extract_files)
+        to expand the tasks.
 
         Works only with validated sources. If there are malformed sources for
-        this DAG, they will be skipped, and an email notification will be sent.
+        this DAG in the configuration file, they will be skipped, and an email
+        notification will be sent.
 
         Returns:
             A list of dictionaries (each representing a single source) with the
@@ -48,7 +49,7 @@ def ingest_from_s3():
 
         from include.ingestion.read_sources import (
             get_dag_sources,
-            get_mapped_s3_sources,
+            prepare_s3_sources,
             get_error_message,
         )
 
@@ -70,7 +71,7 @@ def ingest_from_s3():
                 html_content=get_error_message(errors),
             )(context)
 
-        kwargs_to_expand = get_mapped_s3_sources(
+        kwargs_to_expand = prepare_s3_sources(
             valid_sources, conf.AWS_ANONYMOUS_CONN_NAME
         )
 

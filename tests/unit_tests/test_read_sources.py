@@ -6,7 +6,7 @@ from include.ingestion.read_sources import (
     _validate_source,
     _format_endpoints,
     get_dag_sources,
-    get_mapped_s3_sources,
+    prepare_s3_sources,
     get_error_message,
 )
 
@@ -50,11 +50,6 @@ def create_source_yaml(tmp_path):
                 f"expected one of {ALLOWED_SCHEMES} as the scheme."
             ],
             id="missing_scheme_separator",
-        ),
-        pytest.param(
-            {"base_url": "s3://my-bucket", "endpoints": []},
-            [],
-            id="empty_endpoints_list_currently_passes",
         ),
         pytest.param(
             {},
@@ -107,9 +102,7 @@ def test_format_undefined_placeholder_returns_error() -> None:
     )
 
 
-# ---------------------------------------------------------------------------
 # get_dag_sources
-# ---------------------------------------------------------------------------
 
 
 def test_get_dag_sources_filters_and_formats_correctly(create_source_yaml) -> None:
@@ -205,9 +198,7 @@ def test_get_dag_sources_logs_errors_and_warnings(caplog, create_source_yaml) ->
     assert warning_logs == ["The dag dag_1 has no sources."]
 
 
-# ---------------------------------------------------------------------------
-# get_mapped_s3_sources
-# ---------------------------------------------------------------------------
+# prepare_s3_sources
 
 
 def test_get_mapped_s3_sources_maps_and_assigns_connections() -> None:
@@ -223,7 +214,7 @@ def test_get_mapped_s3_sources_maps_and_assigns_connections() -> None:
             # missing conn should fall back to default
         },
     }
-    result = get_mapped_s3_sources(sources, "default_conn")
+    result = prepare_s3_sources(sources, "default_conn")
 
     assert result == [
         {"bucket": "my-bucket/subfolder", "key": "a.csv", "aws_conn_id": "my_conn"},
@@ -232,9 +223,7 @@ def test_get_mapped_s3_sources_maps_and_assigns_connections() -> None:
     ]
 
 
-# ---------------------------------------------------------------------------
 # get_error_message
-# ---------------------------------------------------------------------------
 
 
 def test_get_error_message_formats_multiple_sources_and_errors() -> None:

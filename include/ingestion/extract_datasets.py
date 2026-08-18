@@ -18,8 +18,8 @@ def upload_stream_to_s3(
     s3_client: S3Client,
     bucket: str,
     key: str,
-    transfer_config: TransferConfig | None = None,
-    extra_args: dict | None = None,
+    transfer_config: TransferConfig = None,
+    extra_args: dict = None,
 ) -> None:
     """
     Streams a file-like object to S3.

@@ -1,6 +1,7 @@
 import yaml
 import itertools
 import logging
+from typing import Iterator
 
 logger = logging.getLogger(__name__)
 
@@ -34,7 +35,7 @@ def _validate_source(
                 f"Source '{source_name}' has nothing after the scheme in base_url '{base_url}'."
             )
 
-    if source_data.get("endpoints") is None:
+    if not source_data.get("endpoints"):
         errors.append(
             f"At least one endpoint is required: the {source_name} source has no endpoints."
         )
@@ -42,16 +43,18 @@ def _validate_source(
     return errors
 
 
+def _generate_keyword_combinations(keywords: dict[str, list]) -> Iterator[dict]:
+    """Generates all parameter dictionaries from the Cartesian product of keywords."""
+    for comb in itertools.product(*keywords.values()):
+        yield dict(zip(keywords.keys(), comb))
+
+
 def _format_endpoints(
     source_name: str, source_data: dict, runtime_params: dict
 ) -> tuple[list[str], str | None]:
     """
-    Formats all (keyword-combo, endpoint) pairs.
-
-    Builds the cartesian product of source_data['keywords'] (or a single
-    empty combo if no keywords are defined), merges each combo with
-    runtime_params, and uses the result to .format() every endpoint
-    template. Duplicate formatted endpoints are dropped.
+    Formats endpoints with keywords merges and runtime_params.
+    Duplicate formatted endpoints are dropped.
 
     Stops and returns early on the first formatting error (e.g. an
     endpoint referencing an undefined parameter).
@@ -62,19 +65,13 @@ def _format_endpoints(
         formatted_endpoints contains only the endpoints formatted before
         the error occurred.
     """
-    keywords = source_data.get("keywords")
-    if keywords is None:
-        format_words_combos = [{}]
-    else:
-        format_words_combos = (
-            dict(zip(keywords.keys(), comb))
-            for comb in itertools.product(*keywords.values())
-        )
+    keywords = source_data.get("keywords") or {}
+    keywords_combos = _generate_keyword_combinations(keywords)
 
     seen = set()
     formatted_endpoints = []
 
-    for format_words_combo in format_words_combos:
+    for format_words_combo in keywords_combos:
         full_params = {**format_words_combo, **runtime_params}
         for endpoint in source_data["endpoints"]:
             try:
@@ -167,15 +164,14 @@ def get_dag_sources(
     return selected, errors
 
 
-def get_mapped_s3_sources(sources: dict[str, dict], default_conn: str) -> list[dict]:
+def prepare_s3_sources(sources: dict[str, dict], default_conn: str) -> list[dict]:
     """
-    Maps sources into the per-endpoint kwargs expected by the mapped
-    extract_files task group. Strips the scheme prefix from each source's
-    base_url to get a pure bucket name.
+    Prepare S3 sources to expand a task in Airflow DAG.
 
-    Each source can have multiple endpoints; this expands every
-    (source, endpoint) pair into its own dict, so a source with N endpoints
-    produces N entries in the returned list.
+    Each source's base_url is stripped of its scheme prefix to get a bucket
+    name, and each of its endpoints becomes its own {bucket, key, aws_conn_id}
+    dict — so a source with N endpoints yields N entries. Sources without an
+    airflow_conn fall back to default_conn.
 
     Args:
         sources: A dict of sources, as returned by get_dag_sources, keyed
@@ -184,11 +180,9 @@ def get_mapped_s3_sources(sources: dict[str, dict], default_conn: str) -> list[d
                     (e.g. 's3://my-bucket').
                 - endpoints: A list of keys (paths) to files in the bucket.
                 - airflow_conn (optional): The Airflow connection ID for
-                    the source bucket. If missing or falsy, default_conn
-                    is used instead.
+                    the source bucket.
         default_conn: The Airflow connection ID to use for sources that
-            don't specify their own airflow_conn (i.e. public/anonymous
-            sources).
+            don't specify their own airflow_conn.
 
     Returns:
         A list of dicts, one per (source, endpoint) pair, each with the

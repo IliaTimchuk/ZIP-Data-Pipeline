@@ -1,7 +1,6 @@
   x-airflow-common:
     &airflow-common
-    build:
-      context: docker/airflow
+    build: docker/airflow
     env_file:
       - .env
     environment:
@@ -18,14 +17,6 @@
       PYTHONPATH: '/opt/airflow'
       AIRFLOW__SCHEDULER__ENABLE_HEALTH_CHECK: 'true'
       AIRFLOW_CONFIG: '/opt/airflow/config/airflow.cfg'
-      AIRFLOW__EMAIL__EMAIL_BACKEND: airflow.utils.email.send_email_smtp
-      AIRFLOW__SMTP__SMTP_HOST: smtp.gmail.com
-      AIRFLOW__SMTP__SMTP_STARTTLS: 'true'
-      AIRFLOW__SMTP__SMTP_SSL: 'false'
-      AIRFLOW__SMTP__SMTP_USER: ${SMTP_USER}
-      AIRFLOW__SMTP__SMTP_PASSWORD: ${SMTP_PASSWORD}
-      AIRFLOW__SMTP__SMTP_PORT: 587
-      AIRFLOW__SMTP__SMTP_MAIL_FROM: ${SMTP_USER}
     volumes:
       - ${AIRFLOW_PROJ_DIR:-.}/dags:/opt/airflow/dags
       - ${AIRFLOW_PROJ_DIR:-.}/logs:/opt/airflow/logs
@@ -190,10 +181,10 @@
       build: ./docker/pyarrow
       env_file: .env
       container_name: pyarrow
+      command: ["python", "include/bronze/unarchive_zip.py"]
       volumes:
         - ./include:/scripts/include
       environment:
-        AWS_ENDPOINT: ${AWS_ENDPOINT}
         PYTHONPATH: /scripts
 
     airflow-tests:
