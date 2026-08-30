@@ -3,7 +3,7 @@ import pyarrow as pa
 import io
 import zipfile
 
-# import include.bronze.unarchive_zip as unzip
+# import scripts.bronze.unarchive_zip as unzip
 
 
 @pytest.fixture

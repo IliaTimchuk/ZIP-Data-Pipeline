@@ -1,3 +1,7 @@
+pytest
+moto
+moto[server]
+
 pyarrow
 boto3
 mypy_boto3_s3

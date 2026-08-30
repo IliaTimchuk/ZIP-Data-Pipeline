@@ -1,0 +1,2 @@
+daily_trades:
+  schema: ["id", "price", "qty", "quote_qty", "time", "is_buyer_maker"]

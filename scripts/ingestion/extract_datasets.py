@@ -2,7 +2,6 @@ import logging
 from botocore.exceptions import ClientError
 from boto3.s3.transfer import TransferConfig
 from mypy_boto3_s3 import S3Client
-from include.utils.logging_helpers import format_file_size
 
 logger = logging.getLogger(__name__)
 
@@ -90,22 +89,15 @@ def validate_file_size(s3_client: S3Client, bucket: str, key: str, expected_size
 
     if actual_size != expected_size:
 
-        error_msg = (
-            f"Transfer size mismatch for {key}: "
-            f"expected {format_file_size(expected_size)}, "
-            f"got {format_file_size(actual_size)}."
-        )
+        error_msg = (f"Transfer size mismatch for {key}")
 
         try:
             s3_client.delete_object(Bucket=bucket, Key=key)
 
             logger.warning(
-                "Deleted corrupt object s3://%s/%s after size mismatch "
-                "(expected %s, got %s)",
+                "Deleted corrupt object s3://%s/%s after size mismatch ",
                 bucket,
-                key,
-                format_file_size(expected_size),
-                format_file_size(actual_size),
+                key
             )
 
             error_msg += f" The file was deleted from {bucket}."

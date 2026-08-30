@@ -7,7 +7,7 @@ from boto3.s3.transfer import TransferConfig
 from io import BytesIO
 from moto import mock_aws
 
-from include.ingestion.extract_datasets import (
+from scripts.ingestion.extract_datasets import (
     upload_stream_to_s3,
     validate_file_size,
 )
@@ -17,7 +17,7 @@ TEST_BUCKET = "test_bucket"
 TEST_KEY = "test/key/file.txt"
 
 
-@pytest.fixture(scope="function")
+@pytest.fixture
 def aws_credentials():
     """Mocked AWS Credentials for moto."""
     os.environ["AWS_ACCESS_KEY_ID"] = "testing"

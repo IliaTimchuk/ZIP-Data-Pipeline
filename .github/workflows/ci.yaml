@@ -20,7 +20,8 @@ jobs:
 
       - name: Build and Run Tests
         run: |
-          docker compose run --rm airflow-tests
+          docker compose run --rm python-test
+          docker compose run --rm airflow-test
 
       - name: Clean Up Stack
         if: always()

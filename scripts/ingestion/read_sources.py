@@ -35,10 +35,22 @@ def _validate_source(
                 f"Source '{source_name}' has nothing after the scheme in base_url '{base_url}'."
             )
 
-    if not source_data.get("endpoints"):
+    endpoints = source_data.get("endpoints")
+    if not endpoints:
         errors.append(
             f"At least one endpoint is required: the {source_name} source has no endpoints."
         )
+    else:
+        for endpoint in endpoints:
+            if (
+                not isinstance(endpoint, dict)
+                or "path" not in endpoint
+                or "dataset_name" not in endpoint
+            ):
+                errors.append(
+                    f"Source '{source_name}' has an endpoint that is missing "
+                    f"'path' or 'dataset_name': {endpoint}"
+                )
 
     return errors
 
@@ -51,10 +63,10 @@ def _generate_keyword_combinations(keywords: dict[str, list]) -> Iterator[dict]:
 
 def _format_endpoints(
     source_name: str, source_data: dict, runtime_params: dict
-) -> tuple[list[str], str | None]:
+) -> tuple[list[dict], str | None]:
     """
-    Formats endpoints with keywords merges and runtime_params.
-    Duplicate formatted endpoints are dropped.
+    Formats endpoints (path, dataset_name) with keywords merges and
+    runtime_params. Duplicate formatted endpoints are dropped.
 
     Stops and returns early on the first formatting error (e.g. an
     endpoint referencing an undefined parameter).
@@ -74,24 +86,32 @@ def _format_endpoints(
     for format_words_combo in keywords_combos:
         full_params = {**format_words_combo, **runtime_params}
         for endpoint in source_data["endpoints"]:
+
+            path = endpoint["path"]
+            dataset_name = endpoint["dataset_name"]
+
             try:
-                formatted = endpoint.format(**full_params)
+                formatted_path = path.format(**full_params)
+                formatted_dataset_name = dataset_name.format(**full_params)
             except (KeyError, IndexError, ValueError) as e:
                 error = (
-                    f"Endpoint '{endpoint}' in source '{source_name}' "
-                    f"is invalid or references an undefined parameter: {e}"
+                    f"Endpoint '{path}' or dataset name '{dataset_name}' in source "
+                    f"'{source_name}' is invalid or references an undefined parameter: {e}"
                 )
                 return formatted_endpoints, error
 
-            if formatted not in seen:
-                seen.add(formatted)
-                formatted_endpoints.append(formatted)
+            key = (formatted_path, formatted_dataset_name)
+            if key not in seen:
+                seen.add(key)
+                formatted_endpoints.append(
+                    {"path": formatted_path, "dataset_name": formatted_dataset_name}
+                )
 
     return formatted_endpoints, None
 
 
 def get_dag_sources(
-    dag_id: str, path: str, allowed_schemes: list[str], **runtime_params
+    dag_id: str, file_path: str, allowed_schemes: list[str], **runtime_params
 ) -> tuple[dict[str, dict], dict[str, list]]:
     """
     Reads sources.yaml, filters to sources belonging to dag_id, and formats
@@ -105,18 +125,19 @@ def get_dag_sources(
 
     Parameters:
         dag_id: The DAG ID to filter sources by.
-        path: The path to the sources YAML file.
+        file_path: The path to the sources YAML file.
         allowed_schemes: Scheme prefixes (without '://') permitted for this DAG.
         **runtime_params: Runtime parameters to use for formatting endpoints.
 
     Returns:
         A tuple of (selected, errors):
             - selected: dict of valid sources belonging to dag_id, with
-                endpoints formatted using the provided runtime parameters.
+                endpoints (path, dataset_name) formatted using the provided
+                runtime parameters.
             - errors: dict mapping source_name to a list of error message
                 strings for that source.
     """
-    with open(path, "r") as f:
+    with open(file_path, "r") as f:
         sources = yaml.safe_load(f) or {}
 
     selected = {}
@@ -169,24 +190,29 @@ def prepare_s3_sources(sources: dict[str, dict], default_conn: str) -> list[dict
     Prepare S3 sources to expand a task in Airflow DAG.
 
     Each source's base_url is stripped of its scheme prefix to get a bucket
-    name, and each of its endpoints becomes its own {bucket, key, aws_conn_id}
-    dict — so a source with N endpoints yields N entries. Sources without an
-    airflow_conn fall back to default_conn.
+    name, and each of its endpoints becomes its own dict:
+    {source_name, dataset_name, bucket, key, aws_conn_id} — so a source with
+    N endpoints yields N entries. Sources without an airflow_conn fall back to
+    default_conn.
 
     Args:
-        sources: A dict of sources, as returned by get_dag_sources, keyed
-            by source name. Each source dict must contain:
+        sources: A dict of sources, as returned by get_dag_sources, keyed by
+            source name. Each source dict must contain:
                 - base_url: The source location, as 'scheme://bucket-name'
                     (e.g. 's3://my-bucket').
-                - endpoints: A list of keys (paths) to files in the bucket.
-                - airflow_conn (optional): The Airflow connection ID for
-                    the source bucket.
-        default_conn: The Airflow connection ID to use for sources that
-            don't specify their own airflow_conn.
+                - endpoints: A list of dicts (path, dataset_name) to files in
+                    the bucket.
+                - airflow_conn (optional): The Airflow connection ID for the
+                    source bucket.
+        default_conn: The Airflow connection ID to use for sources that don't
+            specify their own airflow_conn.
 
     Returns:
         A list of dicts, one per (source, endpoint) pair, each with the
         following keys:
+            - source_name: The source name from the configuration file.
+            - dataset_name: The dataset name from the configuration file that
+                    is used to build a key in the landing bucket. 
             - bucket: The source bucket name.
             - key: The source key (path) to the file in the bucket.
             - aws_conn_id: The Airflow connection ID to use when reading
@@ -195,13 +221,19 @@ def prepare_s3_sources(sources: dict[str, dict], default_conn: str) -> list[dict
     """
     kwargs_to_expand = []
 
-    for source_data in sources.values():
+    for source_name, source_data in sources.items():
         conn = source_data.get("airflow_conn", default_conn)
         bucket = source_data["base_url"].split("://", 1)[-1].rstrip("/")
 
         for endpoint in source_data["endpoints"]:
             kwargs_to_expand.append(
-                {"bucket": bucket, "key": endpoint, "aws_conn_id": conn}
+                {
+                    "source_name": source_name,
+                    "dataset_name": endpoint["dataset_name"],
+                    "bucket": bucket,
+                    "key": endpoint["path"],
+                    "aws_conn_id": conn,
+                }
             )
 
     return kwargs_to_expand

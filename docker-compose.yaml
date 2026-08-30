@@ -18,10 +18,11 @@
       AIRFLOW__SCHEDULER__ENABLE_HEALTH_CHECK: 'true'
       AIRFLOW_CONFIG: '/opt/airflow/config/airflow.cfg'
     volumes:
-      - ${AIRFLOW_PROJ_DIR:-.}/dags:/opt/airflow/dags
-      - ${AIRFLOW_PROJ_DIR:-.}/logs:/opt/airflow/logs
-      - ${AIRFLOW_PROJ_DIR:-.}/config:/opt/airflow/config
-      - ${AIRFLOW_PROJ_DIR:-.}/include:/opt/airflow/include
+      - ${AIRFLOW_PROJ_DIR:-.}/airflow/dags:/opt/airflow/dags
+      - ${AIRFLOW_PROJ_DIR:-.}/airflow/logs:/opt/airflow/logs
+      - ${AIRFLOW_PROJ_DIR:-.}/airflow/config:/opt/airflow/config
+      - ${AIRFLOW_PROJ_DIR:-.}/scripts:/opt/airflow/scripts
+      - ${AIRFLOW_PROJ_DIR:-.}/settings:/opt/airflow/settings
     user: "${AIRFLOW_UID:-50000}:0"
     depends_on:
       &airflow-common-depends-on
@@ -33,7 +34,7 @@
     build: ./docker/spark
     env_file: .env
     volumes:
-      - ./include/spark_jobs:/opt/spark/jobs
+      - ./scripts/spark_jobs:/opt/spark/jobs
 
   services:
     postgres:
@@ -181,26 +182,56 @@
       build: ./docker/pyarrow
       env_file: .env
       container_name: pyarrow
-      command: ["python", "include/bronze/unarchive_zip.py"]
+      command: ["python", "scripts/bronze/bronze_entrypoint.py"]
       volumes:
-        - ./include:/scripts/include
+        - ./scripts:/include/scripts
       environment:
-        PYTHONPATH: /scripts
+        PYTHONPATH: /include
+    
+    postgres-test:
+      image: postgres:16
+      environment:
+        POSTGRES_USER: ${POSTGRES_USERNAME}
+        POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+        POSTGRES_DB: airflow_test
+      tmpfs:
+        - /var/lib/postgresql/data
+      healthcheck:
+        test: ["CMD", "pg_isready", "-U", "${POSTGRES_USERNAME}", "-d", "${POSTGRES_DB}"]
+        interval: 10s
+        retries: 5
+        start_period: 5s
+      restart: always
 
-    airflow-tests:
+    airflow-test:
       <<: *airflow-common
       build: ./docker/airflow-test
-      command: ["python", "-m", "pytest", "-v", "/opt/airflow/tests"]
+      user: "0:0"
+      environment:
+        <<: *airflow-common-env
+        AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://${POSTGRES_USERNAME}:${POSTGRES_PASSWORD}@postgres-test/airflow_test
+        _AIRFLOW_DB_MIGRATE: 'true'
+      command: ["python", "-m", "pytest", "-vv", "/opt/airflow/tests"]
       volumes:
-        - ${AIRFLOW_PROJ_DIR:-.}/dags:/opt/airflow/dags
-        - ${AIRFLOW_PROJ_DIR:-.}/logs:/opt/airflow/logs
-        - ${AIRFLOW_PROJ_DIR:-.}/config:/opt/airflow/config
-        - ${AIRFLOW_PROJ_DIR:-.}/include:/opt/airflow/include
-        - ${AIRFLOW_PROJ_DIR:-.}/tests:/opt/airflow/tests
+        - ${AIRFLOW_PROJ_DIR:-.}/airflow/dags:/opt/airflow/dags
+        - ${AIRFLOW_PROJ_DIR:-.}/airflow/logs:/opt/airflow/logs
+        - ${AIRFLOW_PROJ_DIR:-.}/airflow/config:/opt/airflow/config
+        - ${AIRFLOW_PROJ_DIR:-.}/scripts:/opt/airflow/scripts
+        - ${AIRFLOW_PROJ_DIR:-.}/settings:/opt/airflow/settings 
+        - ${AIRFLOW_PROJ_DIR:-.}/tests/dag_tests:/opt/airflow/tests
       depends_on:
-        <<: *airflow-common-depends-on
-        airflow-init:
-          condition: service_completed_successfully
+        postgres-test:
+          condition: service_healthy
+      
+    python-test:
+      build: ./docker/python-test
+      container_name: python-test
+      command: ["python", "-m", "pytest", "-vv", "-s", "/include/tests/"]
+      volumes:
+        - ./scripts:/include/scripts
+        - ./settings:/include/settings
+        - ./tests/unit_tests:/include/tests/unit_tests
+        - ./tests/integration_tests:/include/tests/integration_tests
           
   volumes:
     postgres-db-volume:
