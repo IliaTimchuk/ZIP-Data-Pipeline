@@ -4,7 +4,7 @@ import pyarrow as pa
 import pyarrow.csv as pa_csv
 from pyarrow.fs import S3FileSystem
 from mypy_boto3_s3 import S3Client
-from typing import Iterator, Callable
+from typing import Iterator
 
 import scripts.bronze.unarchive_zip as unzip
 from scripts.bronze.read_dataset_schema import read_dataset_schema_from_yaml

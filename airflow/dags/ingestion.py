@@ -1,6 +1,6 @@
 import settings.pipeline_config as conf
 from scripts.utils.build_layer_key import build_landing_key
-from airflow.sdk import dag, task, task_group
+from airflow.sdk import dag, task, task_group, Asset
 from airflow.providers.amazon.aws.sensors.s3 import S3KeySensor
 from airflow.providers.smtp.notifications.smtp import SmtpNotifier
 from datetime import datetime, timedelta
@@ -19,7 +19,7 @@ INGEST_FROM_S3_SOURCE_ALLOWED_SCHEMES = ["s3"]
     schedule="0 0 * * *",
     start_date=datetime(2026, 1, 1),
     catchup=False,
-    description="This DAG extracts files from the S3 bucket once they "
+    description="Extracts files from the S3 bucket once they " \
     "are available and loads them to the landing bucket.",
     tags=["ingestion"],
     default_args=default_args,
@@ -140,7 +140,12 @@ def ingest_from_s3():
             )
 
             dest_client = dest_hook.get_conn()
-            dest_key = build_landing_key(source_key, source_name, dataset_name, ds)
+            dest_key = build_landing_key(
+                source_name=source_name,
+                source_key=source_key,
+                dataset_name=dataset_name,
+                date=ds,
+            )
 
             with obj["Body"] as body_stream:
                 upload_stream_to_s3(

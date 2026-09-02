@@ -1,6 +1,6 @@
   x-airflow-common:
     &airflow-common
-    build: docker/airflow
+    build: ./docker/airflow
     env_file:
       - .env
     environment:
@@ -182,11 +182,11 @@
       build: ./docker/pyarrow
       env_file: .env
       container_name: pyarrow
-      command: ["python", "scripts/bronze/bronze_entrypoint.py"]
+      command: ["python", "-m", "scripts.bronze.bronze_entrypoint"]
       volumes:
-        - ./scripts:/include/scripts
-      environment:
-        PYTHONPATH: /include
+        - ./scripts:/scripts
+        - ./settings:/settings
+  
     
     postgres-test:
       image: postgres:16
