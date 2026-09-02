@@ -4,7 +4,7 @@ The ELT pipeline that ingests ZIP files from S3 buckets, decompresses them, and 
 ![The ZIP-Data-Pipeline architecture](./docs/images/architecture-overview.png)
 
 
-## **Tech Stack**
+## **Technologies**
 - **Orchestration:** [Apache Airflow](https://airflow.apache.org/).
 - **Processing:** [Apache Spark](https://spark.apache.org/docs/latest/), [PyArrow](https://arrow.apache.org/docs/python/index.html).
 - **Data Lake:** [MinIO](https://docs.min.io/aistor/), [Apache Iceberg](https://iceberg.apache.org/).
