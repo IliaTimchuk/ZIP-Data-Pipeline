@@ -1,9 +1,12 @@
 import settings.pipeline_config as conf
-from scripts.utils.build_layer_key import build_landing_key
-from airflow.sdk import dag, task, task_group, Asset
+from airflow.sdk import dag, task, task_group
 from airflow.providers.amazon.aws.sensors.s3 import S3KeySensor
 from airflow.providers.smtp.notifications.smtp import SmtpNotifier
 from datetime import datetime, timedelta
+from scripts.utils.build_layer_key import build_landing_key
+from settings.airflow_assets import LANDING_ASSET
+
+INGEST_FROM_S3_SOURCE_ALLOWED_SCHEMES = ["s3"]
 
 default_args = {
     "owner": "IliaTimchuk",
@@ -12,14 +15,12 @@ default_args = {
     "on_failure_callback": [SmtpNotifier(to=conf.ALERT_EMAILS)],
 }
 
-INGEST_FROM_S3_SOURCE_ALLOWED_SCHEMES = ["s3"]
-
 
 @dag(
     schedule="0 0 * * *",
     start_date=datetime(2026, 1, 1),
     catchup=False,
-    description="Extracts files from the S3 bucket once they " \
+    description="Extracts files from the S3 bucket once they "
     "are available and loads them to the landing bucket.",
     tags=["ingestion"],
     default_args=default_args,
@@ -89,7 +90,8 @@ def ingest_from_s3():
         Waits for the file to be available, and then streams it to the landing bucket.
 
         One instance of this task group is created per source/endpoint combination,
-        so each instance handles exactly one (bucket, key) pair.
+        so each instance handles exactly one (bucket, key) pair. Once data arrives to the
+        landing_bucket, triggers the bronze DAG.
         """
 
         wait_for_file = S3KeySensor(
@@ -105,6 +107,7 @@ def ingest_from_s3():
         @task(
             retry_exponential_backoff=True,
             max_retry_delay=timedelta(minutes=30),
+            outlets=[LANDING_ASSET],
         )
         def stream_file(
             source_name: str,
@@ -112,7 +115,7 @@ def ingest_from_s3():
             source_bucket: str,
             source_key: str,
             source_conn_id: str,
-            ds: str,
+            **context,
         ) -> None:
             """
             Streams a single file from a source S3 bucket into the internal raw
@@ -138,13 +141,13 @@ def ingest_from_s3():
                 aws_conn_id=conf.AWS_CONN_NAME,
                 config=Config(retries={"max_attempts": 3, "mode": "standard"}),
             )
-
             dest_client = dest_hook.get_conn()
-            dest_key = build_landing_key(
+
+            landing_key = build_landing_key(
                 source_name=source_name,
                 source_key=source_key,
                 dataset_name=dataset_name,
-                date=ds,
+                date=context["ds"],
             )
 
             with obj["Body"] as body_stream:
@@ -152,15 +155,21 @@ def ingest_from_s3():
                     fileobj=body_stream,
                     s3_client=dest_client,
                     bucket=conf.LANDING_BUCKET,
-                    key=dest_key,
+                    key=landing_key,
                 )
 
             validate_file_size(
                 s3_client=dest_client,
                 bucket=conf.LANDING_BUCKET,
-                key=dest_key,
+                key=landing_key,
                 expected_size=obj.get("ContentLength"),
             )
+
+            context["outlet_events"][LANDING_ASSET].extra = {
+                "landing_bucket": conf.LANDING_BUCKET,
+                "landing_key": landing_key,
+                "dataset_name": dataset_name,
+            }
 
         wait_for_file >> stream_file(
             source_name, dataset_name, bucket, key, aws_conn_id

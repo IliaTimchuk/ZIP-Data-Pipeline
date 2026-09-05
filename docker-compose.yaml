@@ -23,6 +23,7 @@
       - ${AIRFLOW_PROJ_DIR:-.}/airflow/config:/opt/airflow/config
       - ${AIRFLOW_PROJ_DIR:-.}/scripts:/opt/airflow/scripts
       - ${AIRFLOW_PROJ_DIR:-.}/settings:/opt/airflow/settings
+      - ${DOCKER_SOCK_PATH:-/var/run/docker.sock}:/var/run/docker.sock
     user: "${AIRFLOW_UID:-50000}:0"
     depends_on:
       &airflow-common-depends-on
@@ -180,6 +181,7 @@
 
     pyarrow:
       build: ./docker/pyarrow
+      image: pyarrow-custom
       env_file: .env
       container_name: pyarrow
       command: ["python", "-m", "scripts.bronze.bronze_entrypoint"]
@@ -187,6 +189,9 @@
         - ./scripts:/scripts
         - ./settings:/settings
   
+    pyarrow-build:
+      build: ./docker/pyarrow
+      image: pyarrow-custom
     
     postgres-test:
       image: postgres:16

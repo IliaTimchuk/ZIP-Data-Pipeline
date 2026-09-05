@@ -1,7 +1,9 @@
 import os
 import boto3
+import logging
 import pyarrow as pa
 import pyarrow.csv as pa_csv
+from datetime import datetime, timezone
 from pyarrow.fs import S3FileSystem
 from mypy_boto3_s3 import S3Client
 from typing import Iterator
@@ -10,32 +12,48 @@ import scripts.bronze.unarchive_zip as unzip
 from scripts.bronze.read_dataset_schema import read_dataset_schema_from_yaml
 from settings.pipeline_config import DATASET_SCHEMAS_YAML_PATH
 
+logger = logging.getLogger(__name__)
+
 
 def get_context() -> dict:
     try:
-        return {
-            "source_bucket": os.environ["SOURCE_BUCKET"],
-            "source_key": os.environ["SOURCE_KEY"],
+        context = {
+            "landing_bucket": os.environ["LANDING_BUCKET"],
+            "landing_key": os.environ["LANDING_KEY"],
             "dataset_name": os.environ["DATASET_NAME"],
             "destination_bucket": os.environ["DESTINATION_BUCKET"],
-            "endpoint_url": os.getenv("AWS_ENDPOINT"),
+            "aws_endpoint_url": os.getenv("AWS_ENDPOINT"),
         }
+        logger.info("The bronze context was succesfully extracted. Values: %s", context)
+        return context
     except KeyError as e:
         raise KeyError(
             f"The required environment variable(-s) was not provided: {e}"
         ) from e
 
 
-def get_airflow_metadata_columns():
-    bronze_processed_at = os.environ["_BRONZE_PROCESSED_AT"]
+def get_airflow_metadata_columns(landing_key: str):
+
     dag_run_id = os.environ["_DAG_RUN_ID"]
-    zip_file_name = os.environ["_ZIP_FILE_NAME"]
+
+    time = datetime.now(timezone.utc)
+    bronze_processed_at = int(time.timestamp() * 1000)
+
+    zip_file_name = landing_key.rsplit("/", 1)[-1]
 
     airflow_metadata_columns = {
-        "_bronze_processed_at": pa.scalar(int(bronze_processed_at), pa.timestamp("ms", tz="UTC")),
+        "_bronze_processed_at": pa.scalar(
+            bronze_processed_at, pa.timestamp("ms", tz="UTC")
+        ),
         "_dag_run_id": pa.scalar(dag_run_id, pa.string()),
         "_zip_file_name": pa.scalar(zip_file_name, pa.string()),
     }
+
+    logger.info(
+        "The airflow_metadata_columns were succesfully built. Values: %s",
+        airflow_metadata_columns,
+    )
+
     return airflow_metadata_columns
 
 
@@ -55,15 +73,15 @@ def get_s3_object_iterator(
 
 def main():
     context = get_context()
-    airflow_metadata_columns = get_airflow_metadata_columns()
+    airflow_metadata_columns = get_airflow_metadata_columns(context["landing_key"])
 
-    source_s3_client = boto3.client("s3", endpoint_url=context["endpoint_url"])
-    upload_s3_client = S3FileSystem(endpoint_override=context["endpoint_url"])
+    source_s3_client = boto3.client("s3", endpoint_url=context["aws_endpoint_url"])
+    upload_s3_client = S3FileSystem(endpoint_override=context["aws_endpoint_url"])
 
     source_stream = get_s3_object_iterator(
         s3_client=source_s3_client,
-        source_bucket=context["source_bucket"],
-        source_key=context["source_key"],
+        source_bucket=context["landing_bucket"],
+        source_key=context["landing_key"],
     )
 
     unarchived_stream = unzip.get_unarchived_stream(
@@ -91,7 +109,12 @@ def main():
         unarchived_stream=enriched_stream,
         s3fs=upload_s3_client,
         bucket=context["destination_bucket"],
-        source_key=context["source_key"],
+        source_key=context["landing_key"],
         expected_schema=expected_schema,
         metadata_columns=metadata_column_names,
     )
+
+
+if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO)
+    main()
