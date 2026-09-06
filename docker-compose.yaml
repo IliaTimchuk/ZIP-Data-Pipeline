@@ -179,16 +179,6 @@
       command: >
         /opt/spark/bin/spark-class org.apache.spark.deploy.history.HistoryServer
 
-    pyarrow:
-      build: ./docker/pyarrow
-      image: pyarrow-custom
-      env_file: .env
-      container_name: pyarrow
-      command: ["python", "-m", "scripts.bronze.bronze_entrypoint"]
-      volumes:
-        - ./scripts:/scripts
-        - ./settings:/settings
-  
     pyarrow-build:
       build: ./docker/pyarrow
       image: pyarrow-custom
@@ -210,7 +200,7 @@
 
     airflow-test:
       <<: *airflow-common
-      build: ./docker/airflow-test
+      build: ./docker/airflow-test  
       user: "0:0"
       environment:
         <<: *airflow-common-env
@@ -240,3 +230,7 @@
           
   volumes:
     postgres-db-volume:
+
+  networks:
+    default:
+      name: ${DOCKER_NETWORK_NAME:-zip-data-pipeline_default}

@@ -3,6 +3,7 @@ import boto3
 import logging
 import pyarrow as pa
 import pyarrow.csv as pa_csv
+from dotenv import load_dotenv
 from datetime import datetime, timezone
 from pyarrow.fs import S3FileSystem
 from mypy_boto3_s3 import S3Client
@@ -72,6 +73,7 @@ def get_s3_object_iterator(
 
 
 def main():
+    load_dotenv("/.env")
     context = get_context()
     airflow_metadata_columns = get_airflow_metadata_columns(context["landing_key"])
 

@@ -1,8 +1,7 @@
 import os
 import settings.pipeline_config as conf
 from docker.types import Mount
-from dotenv import dotenv_values
-from airflow.sdk import dag, task, Asset
+from airflow.sdk import dag, task, literal
 from airflow.providers.docker.operators.docker import DockerOperator
 from airflow.providers.smtp.notifications.smtp import SmtpNotifier
 from datetime import datetime, timedelta
@@ -31,6 +30,12 @@ def bronze_zip_to_parquet():
 
     @task
     def load_bronze_config(**context):
+        """
+        Prepare environment variables for the bronze transformation.
+
+        The returned dictionary is stored in XCom, so it mustn't include
+        any confidential data.
+        """
         events = context["triggering_asset_events"][LANDING_ASSET]
         return [
             {
@@ -54,9 +59,11 @@ def bronze_zip_to_parquet():
             Mount(
                 target="/settings", source=f"{AIRFLOW_PROJ_DIR}/settings", type="bind"
             ),
+            Mount(target=literal("/.env"), source=literal(f"{AIRFLOW_PROJ_DIR}/.env"), type="bind"),
         ],
         auto_remove="success",
         mount_tmp_dir=False,
+        network_mode=os.getenv("DOCKER_NETWORK_NAME")
     ).expand(environment=files_to_transform)
 
 
