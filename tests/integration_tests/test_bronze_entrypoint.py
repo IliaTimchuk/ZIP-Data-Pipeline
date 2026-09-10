@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 from pyarrow.fs import S3FileSystem
 from moto.server import ThreadedMotoServer
 
-from scripts.bronze.bronze_entrypoint import main
+from scripts.bronze.entrypoint import main
 from scripts.utils.build_layer_key import build_bronze_key
 
 SOURCE_BUCKET = "landing"
@@ -64,19 +64,18 @@ def aws_credentials(monkeypatch, moto_server):
 
 @pytest.fixture
 def bronze_processed_at():
-    return str(int(datetime.now().timestamp() * 1000))
+    bronze_time = datetime(2026, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
+    return str(int(bronze_time.timestamp() * 1000))
 
 
 @pytest.fixture
-def bronze_env(monkeypatch, moto_server, bronze_processed_at):
-    monkeypatch.setenv("SOURCE_BUCKET", SOURCE_BUCKET)
-    monkeypatch.setenv("SOURCE_KEY", SOURCE_KEY)
+def bronze_env(monkeypatch, moto_server):
+    monkeypatch.setenv("LANDING_BUCKET", SOURCE_BUCKET)
+    monkeypatch.setenv("LANDING_KEY", SOURCE_KEY)
     monkeypatch.setenv("DESTINATION_BUCKET", DESTINATION_BUCKET)
     monkeypatch.setenv("DATASET_NAME", DATASET_NAME)
     monkeypatch.setenv("AWS_ENDPOINT", moto_server)
-    monkeypatch.setenv("_BRONZE_PROCESSED_AT", bronze_processed_at)
     monkeypatch.setenv("_DAG_RUN_ID", "scheduled__2026-08-20T12:00:00+00:00")
-    monkeypatch.setenv("_ZIP_FILE_NAME", "test_file.zip")
 
 
 @pytest.fixture
@@ -148,7 +147,13 @@ def test_bronze_entrypoint_run(
     with patch(
         "scripts.bronze.bronze_entrypoint.DATASET_SCHEMAS_YAML_PATH",
         new=test_dataset_schemas_yaml,
-    ):
+    ), patch(
+        "scripts.bronze.bronze_entrypoint.datetime"
+    ) as mock_dt:
+        expected_timestamp = datetime.fromtimestamp(
+            int(bronze_processed_at) / 1000, tz=timezone.utc
+        )
+        mock_dt.now.return_value = expected_timestamp
         main()
 
     bronze_key = build_bronze_key(SOURCE_KEY, expected_prefix)
@@ -165,10 +170,7 @@ def test_bronze_entrypoint_run(
         assert result[key] == values
 
     assert result["_source_file_name"] == ["zipped_file.csv", "zipped_file.csv"]
-    assert result["_zip_file_name"] == ["test_file.zip", "test_file.zip"]
+    assert result["_zip_file_name"] == [FILE_NAME, FILE_NAME]
     assert result["_dag_run_id"] == ["scheduled__2026-08-20T12:00:00+00:00"] * 2
 
-    expected_timestamp = datetime.fromtimestamp(
-        int(bronze_processed_at) / 1000, tz=timezone.utc
-    )
     assert result["_bronze_processed_at"] == [expected_timestamp, expected_timestamp]

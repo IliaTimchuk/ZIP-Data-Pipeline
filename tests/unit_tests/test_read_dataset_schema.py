@@ -2,9 +2,9 @@ import pytest
 import yaml
 import settings.pipeline_config as conf
 
-from scripts.bronze.read_dataset_schema import (
+from scripts.bronze.schema_validation import (
     resolve_prefix_by_schema,
-    read_dataset_schema_from_yaml,
+    read_dataset_schema,
 )
 
 DATASET_NAME = "test-dataset"
@@ -25,7 +25,7 @@ def test_dataset_schemas_yaml(tmp_path):
 def test_read_dataset_schema_from_yaml_reads_dataset_correctly(
     test_dataset_schemas_yaml,
 ):
-    schema = read_dataset_schema_from_yaml(test_dataset_schemas_yaml, DATASET_NAME)
+    schema = read_dataset_schema(test_dataset_schemas_yaml, DATASET_NAME)
 
     assert schema == DATASET_SCHEMA
 
@@ -33,7 +33,7 @@ def test_read_dataset_schema_from_yaml_reads_dataset_correctly(
 def test_read_dataset_schema_from_yaml_raises(test_dataset_schemas_yaml):
     missing_dataset = "non_existent_dataset"
     with pytest.raises(KeyError) as error:
-        schema = read_dataset_schema_from_yaml(
+        schema = read_dataset_schema(
             test_dataset_schemas_yaml, missing_dataset
         )
 

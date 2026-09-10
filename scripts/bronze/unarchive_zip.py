@@ -3,19 +3,19 @@ import pyarrow as pa
 import pyarrow.dataset as pa_dataset
 import pyarrow.fs as fs
 from stream_unzip import stream_unzip
-from typing import Iterator, Callable
+from typing import Iterator
 
-from scripts.bronze.read_dataset_schema import resolve_prefix_by_schema
+from scripts.bronze.schema_validation import resolve_prefix_by_schema
+from scripts.bronze.utils.readers import get_reader, READERS
 from scripts.utils.build_layer_key import build_bronze_key
-from scripts.bronze.io_wrapper import BytesIteratorIO
+from scripts.bronze.utils.io_wrapper import BytesIteratorIO
 
 logger = logging.getLogger(__name__)
 
 
 def get_unarchived_stream(
     zip_iterator: Iterator[bytes],
-    read_func: Callable[..., pa.RecordBatchReader],
-    read_func_args: dict = None,
+    expected_schema: pa.Schema,
     unarchived_chunk_size: int = 16 * 1024 * 1024,
 ) -> Iterator[tuple[str, int, pa.RecordBatchReader]]:
     """
@@ -49,11 +49,15 @@ def get_unarchived_stream(
 
     if not read_func_args:
         logger.info("The read_func_args were not specified, setting to defaults.")
-    read_func_args = read_func_args or {}
+        read_func_args = {}
 
     for file_name, file_size, unzipped_chunks in unzipped_stream:
         chunk = BytesIteratorIO(unzipped_chunks)
         file_name = file_name.decode()
+
+        read_func, read_func_args = get_reader(
+            file_name=file_name, expected_schema=expected_schema, readers=READERS
+        )
 
         with read_func(chunk, **read_func_args) as reader:
             yield file_name, file_size, reader
@@ -145,7 +149,7 @@ def upload_unarchived_zip_stream_to_s3(
 
         logger.info(
             "File %s was successfully unarchived and uploaded to %s as Parquet."
-            "Schema: %s.",
+            "Key: %s.",
             file_name,
             bucket,
             key,

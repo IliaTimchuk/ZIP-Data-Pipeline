@@ -31,7 +31,7 @@ BRONZE_DAG_ID = "bronze_transformation_zip_to_parquet"
 
 # These are used to build a key for each layer. 
 LANDING_KEY_TEMPLATE = "{source_name}/{dataset_name}/date={date}/{file_name}"
-BRONZE_KEY_TEMPLATE = "{source_name}/{dataset_name}/date={landing_date}/status={validation_prefix}/{file_stem}"
+BRONZE_KEY_TEMPLATE = "{source_name}/{dataset_name}/{landing_date}/status={validation_prefix}/{file_stem}"
 
 # Validation prefixes used in Bronze bucket keys. Resolved by schema validation.
 VERIFIED_PREFIX = "verified"
