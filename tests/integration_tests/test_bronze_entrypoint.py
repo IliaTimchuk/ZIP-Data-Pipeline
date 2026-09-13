@@ -11,8 +11,8 @@ from datetime import datetime, timezone
 from pyarrow.fs import S3FileSystem
 from moto.server import ThreadedMotoServer
 
-from scripts.bronze.entrypoint import main
-from scripts.utils.build_layer_key import build_bronze_key
+from src.bronze.entrypoint import main
+from src.utils.build_layer_key import build_bronze_key
 
 SOURCE_BUCKET = "landing"
 DATASET_NAME = "test-dataset"
@@ -20,29 +20,6 @@ DATASET_SCHEMA = ["id", "name", "score", "is_active"]
 FILE_NAME = "file.zip"
 SOURCE_KEY = f"test_data/{DATASET_NAME}/date=2026-01-01/{FILE_NAME}"
 DESTINATION_BUCKET = "bronze"
-
-
-@pytest.fixture
-def test_zip_file():
-    def _create_zip_file(data: str, zipped_file_name: str):
-        file = io.BytesIO()
-        with zipfile.ZipFile(file, "w", zipfile.ZIP_DEFLATED) as zf:
-            zf.writestr(zipped_file_name, data)
-        file.seek(0)
-        return file
-
-    return _create_zip_file
-
-
-@pytest.fixture
-def test_dataset_schemas_yaml(tmp_path):
-    path = tmp_path / "test_dataset_schemas.yaml"
-    with open(path, "w") as f:
-        yaml.safe_dump(
-            data={DATASET_NAME: {"schema": DATASET_SCHEMA}},
-            stream=f,
-        )
-    return str(path)
 
 
 @pytest.fixture
@@ -86,6 +63,29 @@ def s3_client(aws_credentials, moto_server):
     yield client
 
 
+@pytest.fixture
+def test_zip_file():
+    def _create_zip_file(data: str, zipped_file_name: str):
+        file = io.BytesIO()
+        with zipfile.ZipFile(file, "w", zipfile.ZIP_DEFLATED) as zf:
+            zf.writestr(zipped_file_name, data)
+        file.seek(0)
+        return file
+
+    return _create_zip_file
+
+
+@pytest.fixture
+def test_dataset_schemas_yaml(tmp_path):
+    path = tmp_path / "test_dataset_schemas.yaml"
+    with open(path, "w") as f:
+        yaml.safe_dump(
+            data={DATASET_NAME: {"schema": DATASET_SCHEMA}},
+            stream=f,
+        )
+    return str(path)
+
+    
 @pytest.mark.parametrize(
     "csv_data, expected_prefix, expected_columns, expected_data",
     [
@@ -145,10 +145,10 @@ def test_bronze_entrypoint_run(
         stream.write(zip_content.read())
 
     with patch(
-        "scripts.bronze.bronze_entrypoint.DATASET_SCHEMAS_YAML_PATH",
+        "src.bronze.bronze_entrypoint.DATASET_SCHEMAS_YAML_PATH",
         new=test_dataset_schemas_yaml,
     ), patch(
-        "scripts.bronze.bronze_entrypoint.datetime"
+        "src.bronze.bronze_entrypoint.datetime"
     ) as mock_dt:
         expected_timestamp = datetime.fromtimestamp(
             int(bronze_processed_at) / 1000, tz=timezone.utc

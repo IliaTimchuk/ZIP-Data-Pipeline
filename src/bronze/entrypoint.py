@@ -5,8 +5,8 @@ from pyarrow.fs import S3FileSystem
 from mypy_boto3_s3 import S3Client
 from typing import Iterator
 
-import scripts.bronze.unarchive_zip as unzip
-import scripts.bronze.context as context
+import src.bronze.unarchive_zip as unzip
+import src.bronze.context as bronze_context
 from settings.schemas.bronze_schemas import bronze_schemas
 
 logger = logging.getLogger(__name__)
@@ -19,7 +19,7 @@ def get_s3_object_iterator(
     chunk_size: int = 16 * 1024 * 1024,
 ) -> Iterator[bytes]:
     """
-    Returns an iterable to the S3 object from S3 in chunks of specified size.
+    Returns an iterator over the S3 object in chunks of specified size.
     """
     yield from s3_client.get_object(Bucket=source_bucket, Key=source_key)[
         "Body"
@@ -28,7 +28,7 @@ def get_s3_object_iterator(
 
 def main():
     load_dotenv("/.env")
-    context = context.get_context()
+    context = bronze_context.get_context()
 
     source_s3_client = boto3.client("s3", endpoint_url=context["aws_endpoint_url"])
     upload_s3_client = S3FileSystem(endpoint_override=context["aws_endpoint_url"])
@@ -45,7 +45,7 @@ def main():
         zip_iterator=source_stream, expected_schema=expected_schema
     )
 
-    airflow_metadata_columns = context.get_airflow_metadata_columns(
+    airflow_metadata_columns = bronze_context.get_airflow_metadata_columns(
         context["landing_key"]
     )
     append_file_name = True

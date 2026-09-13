@@ -3,7 +3,7 @@ from airflow.sdk import dag, task, task_group
 from airflow.providers.amazon.aws.sensors.s3 import S3KeySensor
 from airflow.providers.smtp.notifications.smtp import SmtpNotifier
 from datetime import datetime, timedelta
-from scripts.utils.build_layer_key import build_landing_key
+from src.utils.build_layer_key import build_landing_key
 from settings.airflow_assets import LANDING_ASSET
 
 INGEST_FROM_S3_SOURCE_ALLOWED_SCHEMES = ["s3"]
@@ -54,7 +54,7 @@ def ingest_from_s3():
                     be public).
         """
 
-        from scripts.ingestion.read_sources import (
+        from src.ingestion.read_sources import (
             get_dag_sources,
             prepare_s3_sources,
             get_error_message,
@@ -126,7 +126,7 @@ def ingest_from_s3():
             """
 
             from airflow.providers.amazon.aws.hooks.s3 import S3Hook
-            from scripts.ingestion.extract_datasets import (
+            from src.ingestion.upload_datasets import (
                 upload_stream_to_s3,
                 validate_file_size,
             )

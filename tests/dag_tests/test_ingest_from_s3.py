@@ -46,10 +46,10 @@ from dags.ingestion import ingestion_dag
 )
 @patch("airflow.providers.amazon.aws.hooks.s3.S3Hook.get_conn")
 @patch("airflow.providers.amazon.aws.sensors.s3.S3KeySensor.execute", return_value=True)
-@patch("scripts.ingestion.extract_datasets.upload_stream_to_s3")
-@patch("scripts.ingestion.extract_datasets.validate_file_size")
-@patch("scripts.ingestion.read_sources.prepare_s3_sources")
-@patch("scripts.ingestion.read_sources.get_dag_sources", return_value=([], []))
+@patch("src.ingestion.upload_datasets.upload_stream_to_s3")
+@patch("src.ingestion.upload_datasets.validate_file_size")
+@patch("src.ingestion.read_sources.prepare_s3_sources")
+@patch("src.ingestion.read_sources.get_dag_sources", return_value=([], []))
 def test_task_group_mapping_expansion(
     mock_get_dag_sources,
     mock_prepare_s3_sources,

@@ -3,14 +3,54 @@ import pyarrow as pa
 import pyarrow.dataset as pa_dataset
 import pyarrow.fs as fs
 from stream_unzip import stream_unzip
+from collections import deque
 from typing import Iterator
 
-from scripts.bronze.schema_validation import resolve_prefix_by_schema
-from scripts.bronze.utils.readers import get_reader, READERS
-from scripts.utils.build_layer_key import build_bronze_key
-from scripts.bronze.utils.io_wrapper import BytesIteratorIO
+from src.bronze.schema_validation import resolve_prefix_by_schema
+from src.bronze.utils.readers import get_reader, READERS
+from src.utils.build_layer_key import build_bronze_key
+from src.bronze.utils.io_wrapper import BytesIteratorIO
 
 logger = logging.getLogger(__name__)
+
+
+def _get_reader_and_args(
+    file_name: str, schema: pa.Schema
+) -> tuple[callable, dict] | None:
+    """Returns the PyArrow reader function and options for a given file name."""
+    extension = os.path.splitext(file_name)[1].lstrip(".").lower()
+
+    if extension == "csv":
+        opts = pa_csv.ConvertOptions(
+            default_column_type=pa.string(),
+            column_types=schema,
+        )
+        return pa_csv.open_csv, {"convert_options": opts}
+
+    if extension == "json":
+        opts = pa_json.ParseOptions(
+            explicit_schema=schema,
+            unexpected_field_behavior="infer",
+        )
+        return pa_json.open_json, {"parse_options": opts}
+
+    return None
+
+
+def _target_schema(schema: pa.Schema) -> pa.Schema:
+    return pa.schema([
+        field if pa.types.is_nested(field.type) else pa.field(field.name, pa.string())
+        for field in schema
+    ])
+
+
+def _cast_batch_to_string(chunk: pa.RecordBatch, target_schema: pa.Schema) -> pa.RecordBatch:
+    """Casts all non-nested fields in a single batch to strings."""
+    arrays = [
+        col if pa.types.is_nested(col.type) else col.cast(pa.string())
+        for col in chunk.columns
+    ]
+    return pa.RecordBatch.from_arrays(arrays, schema=target_schema)
 
 
 def get_unarchived_stream(
@@ -19,49 +59,48 @@ def get_unarchived_stream(
     unarchived_chunk_size: int = 16 * 1024 * 1024,
 ) -> Iterator[tuple[str, int, pa.RecordBatchReader]]:
     """
-    Initializes an unarchived stream, creating a wrapper around a zip
-    iterator that unarchives a file in chunks.
+    Initializes an unarchived stream, creating a wrapper around a ZIP
+    iterator that unarchives files inside the ZIP archive in chunks.
 
     This function uses the `stream_unzip` package to handle unarchivation
     in chunks: https://stream-unzip.docs.trade.gov.uk/
 
     Args:
-        zip_iterator: the iterator over a zip file.
-        read_func: the pyarrow function that is used to read raw decompressed
-            bytes (file-like). Consider, that some functions read the entire
-            file to the buffer, that kills chunk-reading (e.g. read_csv).
-        reader_args: the args for read_func (if args are not provided for the
-            reader, the args will be set to defaults).
+        zip_iterator: the iterator over a ZIP file.
+        expected_schema: the expected schema for files inside the ZIP archive.
         unarchived_chunk_size: how many bytes to fetch from zip_iterator before
             attempting to process them.
      Yields:
-        tuple[str, int, pa.RecordBatchReader]: for each file inside the zip,
+        tuple[str, int, pa.RecordBatchReader]: for each file inside the ZIP,
             a tuple of:
-            - file_name: the name of the file inside the zip archive.
+            - file_name: the name of the file inside the ZIP archive.
             - file_size: the uncompressed size of that file in bytes, as
-                reported by the zip's local file header.
+                reported by the ZIP's local file header.
             - reader: a RecordBatchReader over that file's decompressed
                 content, produced by read_func. Readers must be consumed before
                 moving to the next yielded file.
     """
-
     unzipped_stream = stream_unzip(zip_iterator, chunk_size=unarchived_chunk_size)
 
-    if not read_func_args:
-        logger.info("The read_func_args were not specified, setting to defaults.")
-        read_func_args = {}
-
-    for file_name, file_size, unzipped_chunks in unzipped_stream:
-        chunk = BytesIteratorIO(unzipped_chunks)
+    for file_name, file_size, unzipped_iterator in unzipped_stream:
         file_name = file_name.decode()
-
-        read_func, read_func_args = get_reader(
-            file_name=file_name, expected_schema=expected_schema, readers=READERS
+        read_func, read_func_args = _get_reader_and_args(
+            file_name=file_name, expected_schema=expected_schema
         )
+        if read_func:
+            chunk = BytesIteratorIO(unzipped_iterator)
 
-        with read_func(chunk, **read_func_args) as reader:
-            yield file_name, file_size, reader
+            if not read_func_args:
+                logger.info("The read function's arguments weren not specified. Defult values are used.")
 
+            with read_func(chunk, **read_func_args) as reader:
+                string_reader = (_cast_batch_to_string(chunk) for chunk in reader)
+                yield file_name, file_size,  pa.RecordBatchReader.from_batches(string_reader)
+
+        else:
+            logger.warning("The read function was not specified for %s, skipping.", file_name)
+            deque(unzipped_iterator, maxlen=0)
+            
 
 def _add_columns(chunk: pa.RecordBatch, columns_template: dict[str, pa.Scalar]):
     """Creates columns from columns_shape and appends them to the batch"""
@@ -129,9 +168,9 @@ def upload_unarchived_zip_stream_to_s3(
     metadata_columns = set(metadata_columns or [])
 
     for file_name, file_size, reader in unarchived_stream:
-        actual_schema = [
-            col for col in reader.schema.names if col not in metadata_columns
-        ]
+        actual_schema = pa.schema(
+            [col for col in reader.schema if col not in metadata_columns]
+        )
 
         validation_prefix = resolve_prefix_by_schema(expected_schema, actual_schema)
 

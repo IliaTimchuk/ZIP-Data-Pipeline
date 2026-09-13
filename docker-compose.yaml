@@ -21,7 +21,7 @@
       - ${AIRFLOW_PROJ_DIR:-.}/airflow/dags:/opt/airflow/dags
       - ${AIRFLOW_PROJ_DIR:-.}/airflow/logs:/opt/airflow/logs
       - ${AIRFLOW_PROJ_DIR:-.}/airflow/config:/opt/airflow/config
-      - ${AIRFLOW_PROJ_DIR:-.}/scripts:/opt/airflow/scripts
+      - ${AIRFLOW_PROJ_DIR:-.}/src:/opt/airflow/src
       - ${AIRFLOW_PROJ_DIR:-.}/settings:/opt/airflow/settings
       - ${DOCKER_SOCK_PATH:-/var/run/docker.sock}:/var/run/docker.sock
     user: "${AIRFLOW_UID:-50000}:0"
@@ -35,7 +35,7 @@
     build: ./docker/spark
     env_file: .env
     volumes:
-      - ./scripts/spark_jobs:/opt/spark/jobs
+      - ./src/spark_jobs:/opt/spark/jobs
 
   services:
     postgres:
@@ -211,7 +211,7 @@
         - ${AIRFLOW_PROJ_DIR:-.}/airflow/dags:/opt/airflow/dags
         - ${AIRFLOW_PROJ_DIR:-.}/airflow/logs:/opt/airflow/logs
         - ${AIRFLOW_PROJ_DIR:-.}/airflow/config:/opt/airflow/config
-        - ${AIRFLOW_PROJ_DIR:-.}/scripts:/opt/airflow/scripts
+        - ${AIRFLOW_PROJ_DIR:-.}/src:/opt/airflow/src
         - ${AIRFLOW_PROJ_DIR:-.}/settings:/opt/airflow/settings 
         - ${AIRFLOW_PROJ_DIR:-.}/tests/dag_tests:/opt/airflow/tests
       depends_on:
@@ -223,7 +223,7 @@
       container_name: python-test
       command: ["python", "-m", "pytest", "-vv", "-s", "/include/tests/"]
       volumes:
-        - ./scripts:/include/scripts
+        - ./src:/include/src
         - ./settings:/include/settings
         - ./tests/unit_tests:/include/tests/unit_tests
         - ./tests/integration_tests:/include/tests/integration_tests

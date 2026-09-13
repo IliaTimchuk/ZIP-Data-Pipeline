@@ -53,9 +53,9 @@ def bronze_zip_to_parquet():
     container = DockerOperator.partial(
         task_id="bronze_transformation",
         image="pyarrow-custom",
-        command=["python", "-m", "scripts.bronze.bronze_entrypoint"],
+        command=["python", "-m", conf.BRONZE_ENTRYPOINT_MODULE],
         mounts=[
-            Mount(target="/scripts", source=f"{AIRFLOW_PROJ_DIR}/scripts", type="bind"),
+            Mount(target="/src", source=f"{AIRFLOW_PROJ_DIR}/src", type="bind"),
             Mount(
                 target="/settings", source=f"{AIRFLOW_PROJ_DIR}/settings", type="bind"
             ),
@@ -63,7 +63,7 @@ def bronze_zip_to_parquet():
         ],
         auto_remove="success",
         mount_tmp_dir=False,
-        network_mode=os.getenv("DOCKER_NETWORK_NAME")
+        network_mode=os.environ["DOCKER_NETWORK_NAME"]
     ).expand(environment=files_to_transform)
 
 

@@ -7,7 +7,7 @@ from boto3.s3.transfer import TransferConfig
 from io import BytesIO
 from moto import mock_aws
 
-from scripts.ingestion.extract_datasets import (
+from src.ingestion.upload_datasets import (
     upload_stream_to_s3,
     validate_file_size,
 )

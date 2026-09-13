@@ -2,7 +2,7 @@ import pyarrow as pa
 
 # Format:  {dataset_name: pyarrow.Schema}
 bronze_schemas = {
-    "trades": pa.schema([
+    "daily_trades": pa.schema([
         ("id", pa.string()),
         ("price", pa.string()),
         ("qty", pa.string()),
