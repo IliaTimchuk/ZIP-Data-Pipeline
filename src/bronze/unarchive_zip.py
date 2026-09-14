@@ -6,51 +6,11 @@ from stream_unzip import stream_unzip
 from collections import deque
 from typing import Iterator
 
-from src.bronze.schema_validation import resolve_prefix_by_schema
-from src.bronze.utils.readers import get_reader, READERS
+from bronze.readers import open_file_like, UnsupportedFileExtensionError
 from src.utils.build_layer_key import build_bronze_key
 from src.bronze.utils.io_wrapper import BytesIteratorIO
 
 logger = logging.getLogger(__name__)
-
-
-def _get_reader_and_args(
-    file_name: str, schema: pa.Schema
-) -> tuple[callable, dict] | None:
-    """Returns the PyArrow reader function and options for a given file name."""
-    extension = os.path.splitext(file_name)[1].lstrip(".").lower()
-
-    if extension == "csv":
-        opts = pa_csv.ConvertOptions(
-            default_column_type=pa.string(),
-            column_types=schema,
-        )
-        return pa_csv.open_csv, {"convert_options": opts}
-
-    if extension == "json":
-        opts = pa_json.ParseOptions(
-            explicit_schema=schema,
-            unexpected_field_behavior="infer",
-        )
-        return pa_json.open_json, {"parse_options": opts}
-
-    return None
-
-
-def _target_schema(schema: pa.Schema) -> pa.Schema:
-    return pa.schema([
-        field if pa.types.is_nested(field.type) else pa.field(field.name, pa.string())
-        for field in schema
-    ])
-
-
-def _cast_batch_to_string(chunk: pa.RecordBatch, target_schema: pa.Schema) -> pa.RecordBatch:
-    """Casts all non-nested fields in a single batch to strings."""
-    arrays = [
-        col if pa.types.is_nested(col.type) else col.cast(pa.string())
-        for col in chunk.columns
-    ]
-    return pa.RecordBatch.from_arrays(arrays, schema=target_schema)
 
 
 def get_unarchived_stream(
@@ -74,33 +34,29 @@ def get_unarchived_stream(
         tuple[str, int, pa.RecordBatchReader]: for each file inside the ZIP,
             a tuple of:
             - file_name: the name of the file inside the ZIP archive.
-            - file_size: the uncompressed size of that file in bytes, as
-                reported by the ZIP's local file header.
-            - reader: a RecordBatchReader over that file's decompressed
+            - record_batch_reader: a RecordBatchReader over that file's decompressed
                 content, produced by read_func. Readers must be consumed before
                 moving to the next yielded file.
+            - validation_status
     """
     unzipped_stream = stream_unzip(zip_iterator, chunk_size=unarchived_chunk_size)
 
-    for file_name, file_size, unzipped_iterator in unzipped_stream:
+    for file_name, _, unzipped_iterator in unzipped_stream:
         file_name = file_name.decode()
-        read_func, read_func_args = _get_reader_and_args(
-            file_name=file_name, expected_schema=expected_schema
-        )
-        if read_func:
-            chunk = BytesIteratorIO(unzipped_iterator)
 
-            if not read_func_args:
-                logger.info("The read function's arguments weren not specified. Defult values are used.")
+        try:
+            file_like_iterator = BytesIteratorIO(unzipped_iterator)
 
-            with read_func(chunk, **read_func_args) as reader:
-                string_reader = (_cast_batch_to_string(chunk) for chunk in reader)
-                yield file_name, file_size,  pa.RecordBatchReader.from_batches(string_reader)
+            with open_file_like(
+                file_like_iterator, file_name, expected_schema
+            ) as reader_data:
+                record_batch_reader, validation_prefix = reader_data
+                yield file_name, record_batch_reader, validation_prefix
 
-        else:
-            logger.warning("The read function was not specified for %s, skipping.", file_name)
+        except UnsupportedFileExtensionError as e:
+            logger.warning("Skipping the file inside the ZIP file: %s", e)
             deque(unzipped_iterator, maxlen=0)
-            
+
 
 def _add_columns(chunk: pa.RecordBatch, columns_template: dict[str, pa.Scalar]):
     """Creates columns from columns_shape and appends them to the batch"""
@@ -127,8 +83,8 @@ def add_columns_to_unarchived_stream(
         append_file_name: if True, appends a `_source_file_name` column
             containing the name of the file from the zip file
     """
-    for file_name, file_size, reader in unarchived_stream:
-        current_schema = reader.schema
+    for file_name, record_batch_reader, validation_prefix in unarchived_stream:
+        current_schema = record_batch_reader.schema
         columns_shape_copy = columns_shape.copy()
 
         if append_file_name:
@@ -142,12 +98,14 @@ def add_columns_to_unarchived_stream(
             ]
         )
 
-        batches_gen = (_add_columns(chunk, columns_shape_copy) for chunk in reader)
+        batches_gen = (
+            _add_columns(chunk, columns_shape_copy) for chunk in record_batch_reader
+        )
 
         reader_with_metadata = pa.RecordBatchReader.from_batches(
             schema=new_schema, batches=batches_gen
         )
-        yield file_name, file_size, reader_with_metadata
+        yield file_name, reader_with_metadata, validation_prefix
 
 
 def upload_unarchived_zip_stream_to_s3(
@@ -155,8 +113,6 @@ def upload_unarchived_zip_stream_to_s3(
     s3fs: fs.S3FileSystem,
     bucket: str,
     source_key: str,
-    expected_schema: list[str],
-    metadata_columns: list[str] = None,
 ) -> None:
     """
     Consumes chunks from unarchived_stream and uploads them as Parquet to S3.
@@ -167,12 +123,7 @@ def upload_unarchived_zip_stream_to_s3(
 
     metadata_columns = set(metadata_columns or [])
 
-    for file_name, file_size, reader in unarchived_stream:
-        actual_schema = pa.schema(
-            [col for col in reader.schema if col not in metadata_columns]
-        )
-
-        validation_prefix = resolve_prefix_by_schema(expected_schema, actual_schema)
+    for file_name, record_batch_reader, validation_prefix in unarchived_stream:
 
         key = build_bronze_key(
             landing_key=source_key,
@@ -180,7 +131,7 @@ def upload_unarchived_zip_stream_to_s3(
         )
 
         pa_dataset.write_dataset(
-            data=reader,
+            data=record_batch_reader,
             base_dir=f"{bucket}/{key}",
             filesystem=s3fs,
             format="parquet",

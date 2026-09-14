@@ -2,7 +2,7 @@ import pytest
 import yaml
 import settings.pipeline_config as conf
 
-from src.bronze.schema_validation import (
+from bronze.readers import (
     resolve_prefix_by_schema,
     read_dataset_schema,
 )
