@@ -50,8 +50,8 @@ def get_unarchived_stream(
             with open_file_like(
                 file_like_iterator, file_name, expected_schema
             ) as reader_data:
-                record_batch_reader, validation_prefix = reader_data
-                yield file_name, record_batch_reader, validation_prefix
+                record_batch_reader, verification_status = reader_data
+                yield file_name, record_batch_reader, verification_status
 
         except UnsupportedFileExtensionError as e:
             logger.warning("Skipping the file inside the ZIP file: %s", e)
@@ -71,6 +71,7 @@ def add_columns_to_unarchived_stream(
     unarchived_stream: Iterator[tuple[str, int, pa.RecordBatchReader]],
     columns_shape: dict[str, pa.Scalar],
     append_file_name: bool = False,
+    append_file_verification_status: bool = False 
 ) -> Iterator[tuple[str, int, pa.RecordBatchReader]]:
     """
     Creates a wrapper to append columns to the unarchived stream building them
@@ -83,12 +84,15 @@ def add_columns_to_unarchived_stream(
         append_file_name: if True, appends a `_source_file_name` column
             containing the name of the file from the zip file
     """
-    for file_name, record_batch_reader, validation_prefix in unarchived_stream:
+    for file_name, record_batch_reader, verification_status in unarchived_stream:
         current_schema = record_batch_reader.schema
         columns_shape_copy = columns_shape.copy()
 
         if append_file_name:
             columns_shape_copy["_source_file_name"] = pa.scalar(file_name, pa.string())
+        
+        if append_file_name:
+            columns_shape_copy["_verification_status"] = pa.scalar(verification_status, pa.string())
 
         new_schema = pa.schema(
             list(current_schema)
@@ -105,7 +109,7 @@ def add_columns_to_unarchived_stream(
         reader_with_metadata = pa.RecordBatchReader.from_batches(
             schema=new_schema, batches=batches_gen
         )
-        yield file_name, reader_with_metadata, validation_prefix
+        yield file_name, reader_with_metadata, verification_status
 
 
 def upload_unarchived_zip_stream_to_s3(
@@ -123,11 +127,11 @@ def upload_unarchived_zip_stream_to_s3(
 
     metadata_columns = set(metadata_columns or [])
 
-    for file_name, record_batch_reader, validation_prefix in unarchived_stream:
+    for file_name, record_batch_reader, verification_status in unarchived_stream:
 
         key = build_bronze_key(
             landing_key=source_key,
-            validation_prefix=validation_prefix,
+            verification_status=verification_status,
         )
 
         pa_dataset.write_dataset(

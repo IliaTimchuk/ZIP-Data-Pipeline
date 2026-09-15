@@ -8,26 +8,11 @@ import settings.pipeline_config as conf
 
 
 class UnsupportedFileExtensionError(Exception):
-    """Raised when a file inside the ZIP has an extension we don't know how to parse."""
+    """Raised when a file inside the ZIP has an extension that has no readers."""
 
 
-def _cast_struct(col: pa.Array):
-    """
-    Casts all the data inside the struct type to strings. If nested structs are detected,
-    they are processed with recursion
-    """
-    pass
-
-
-def cast_batch_to_string(
-    chunk: pa.RecordBatchReader, target_schema: pa.Schema
-) -> pa.RecordBatch:
-    """Casts all non-nested fields in a single batch to strings."""
-    arrays = (
-        _cast_struct(col) if pa.types.is_nested(col.type) else col.cast(pa.string())
-        for col in chunk.columns
-    )
-    yield pa.RecordBatch.from_arrays(arrays, schema=target_schema)
+def get_unexpected_columns(batch: pa.RecordBatch, expected_schema: pa.Schema):
+    return [n for n in batch.schema.name if n not in expected_schema.names]
 
 
 def open_string_json(
@@ -48,11 +33,6 @@ def open_string_json(
         file_path=json_iterator, parse_options=options
     )
 
-    if record_batch_reader.schema != expected_schema:
-        unverified_batch_reader = cast_batch_to_string(record_batch_reader)
-        return unverified_batch_reader, conf.UNVERIFIED_PREFIX
-
-    return record_batch_reader, conf.VERIFIED_PREFIX
 
 
 def open_string_csv(

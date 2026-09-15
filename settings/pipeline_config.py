@@ -33,7 +33,7 @@ BRONZE_ENTRYPOINT_MODULE = "src.bronze.entrypoint"
 # These are used to build a key for each layer.
 LANDING_KEY_TEMPLATE = "{source_name}/{dataset_name}/date={date}/{file_name}"
 BRONZE_KEY_TEMPLATE = (
-    "{source_name}/{dataset_name}/{landing_date}/status={validation_prefix}/{file_stem}"
+    "{source_name}/{dataset_name}/{landing_date}/status={verification_status}/{file_stem}"
 )
 
 # Validation prefixes used in Bronze bucket keys. Resolved by schema validation.

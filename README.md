@@ -50,7 +50,7 @@ The [Bronze DAG](airflow/dags/bronze.py) uses Asset-Aware Scheduling, triggering
 
 <table>
   <tr>
-    <td width="300" valign="top">
+    <td width="280" valign="top">
       <img src="./docs/images/bronze-transformation.svg" alt="Bronze transformation overview">
     </td>
     <td valign="top">

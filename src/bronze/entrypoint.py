@@ -29,6 +29,7 @@ def get_s3_object_iterator(
 def main():
     load_dotenv("/.env")
     context = bronze_context.get_context()
+    expected_schema = bronze_schemas[context["dataset_name"]]
 
     source_s3_client = boto3.client("s3", endpoint_url=context["aws_endpoint_url"])
     upload_s3_client = S3FileSystem(endpoint_override=context["aws_endpoint_url"])
@@ -39,8 +40,6 @@ def main():
         source_key=context["landing_key"],
     )
 
-    expected_schema = bronze_schemas[context["dataset_name"]]
-
     unarchived_stream = unzip.get_unarchived_stream(
         zip_iterator=source_stream, expected_schema=expected_schema
     )
@@ -48,26 +47,19 @@ def main():
     airflow_metadata_columns = bronze_context.get_airflow_metadata_columns(
         context["landing_key"]
     )
-    append_file_name = True
 
     enriched_stream = unzip.add_columns_to_unarchived_stream(
         unarchived_stream=unarchived_stream,
         columns_shape=airflow_metadata_columns,
-        append_file_name=append_file_name,
+        append_file_name=True,
+        append_file_verification_status=True,
     )
-
-    metadata_column_names = list(airflow_metadata_columns.keys())
-
-    if append_file_name:
-        metadata_column_names += ["_source_file_name"]
 
     unzip.upload_unarchived_zip_stream_to_s3(
         unarchived_stream=enriched_stream,
         s3fs=upload_s3_client,
         bucket=context["destination_bucket"],
         source_key=context["landing_key"],
-        expected_schema=expected_schema,
-        metadata_columns=metadata_column_names,
     )
 
 
