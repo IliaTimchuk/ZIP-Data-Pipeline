@@ -6,9 +6,9 @@ from stream_unzip import stream_unzip
 from collections import deque
 from typing import Iterator
 
-from bronze.readers import open_file_like, UnsupportedFileExtensionError
+import bronze.readers as readers
 from src.utils.build_layer_key import build_bronze_key
-from src.bronze.utils.io_wrapper import BytesIteratorIO
+from src.bronze.io_wrapper import BytesIteratorIO
 
 logger = logging.getLogger(__name__)
 
@@ -22,38 +22,45 @@ def get_unarchived_stream(
     Initializes an unarchived stream, creating a wrapper around a ZIP
     iterator that unarchives files inside the ZIP archive in chunks.
 
-    This function uses the `stream_unzip` package to handle unarchivation
-    in chunks: https://stream-unzip.docs.trade.gov.uk/
+    Processes a ZIP archive in chunks without loading the full archive into
+    memory. Each decompressed file is converted to a file-like stream, validated
+    against the expected PyArrow schema, and converted into a RecordBatchReader.
+    Files with unsupported extensions are skipped. Currently, supported files
+    are CSV and JSON.
 
     Args:
         zip_iterator: the iterator over a ZIP file.
-        expected_schema: the expected schema for files inside the ZIP archive.
+        expected_schema: the expected pyarrow.schema object to validate decompressed
+            files against.
         unarchived_chunk_size: how many bytes to fetch from zip_iterator before
             attempting to process them.
      Yields:
-        tuple[str, int, pa.RecordBatchReader]: for each file inside the ZIP,
+        tuple[str, pa.RecordBatchReader, str]: for each file inside the ZIP,
             a tuple of:
-            - file_name: the name of the file inside the ZIP archive.
-            - record_batch_reader: a RecordBatchReader over that file's decompressed
-                content, produced by read_func. Readers must be consumed before
-                moving to the next yielded file.
-            - validation_status
+            - file_name: the decoded name of the file inside the ZIP archive.
+            - record_batch_reader: a RecordBatchReader over each decompressed file.
+                Must be consumed.
+            - validation_status: whether the expected_schema matches the actual file
+                schema.
     """
     unzipped_stream = stream_unzip(zip_iterator, chunk_size=unarchived_chunk_size)
 
-    for file_name, _, unzipped_iterator in unzipped_stream:
+    for file_name, file_size, unzipped_iterator in unzipped_stream:
         file_name = file_name.decode()
 
         try:
             file_like_iterator = BytesIteratorIO(unzipped_iterator)
 
-            with open_file_like(
-                file_like_iterator, file_name, expected_schema
-            ) as reader_data:
-                record_batch_reader, verification_status = reader_data
-                yield file_name, record_batch_reader, verification_status
+            with readers.open_file_like(
+                file_like_iterator, file_name
+            ) as record_batch_reader:
 
-        except UnsupportedFileExtensionError as e:
+                validation_prefix = readers.validate_schema(
+                    record_batch_reader, expected_schema
+                )
+                yield file_name, record_batch_reader, validation_status
+
+        except readers.UnsupportedFileExtensionError as e:
             logger.warning("Skipping the file inside the ZIP file: %s", e)
             deque(unzipped_iterator, maxlen=0)
 
@@ -71,28 +78,33 @@ def add_columns_to_unarchived_stream(
     unarchived_stream: Iterator[tuple[str, int, pa.RecordBatchReader]],
     columns_shape: dict[str, pa.Scalar],
     append_file_name: bool = False,
-    append_file_verification_status: bool = False 
+    append_file_validation_status: bool = False,
 ) -> Iterator[tuple[str, int, pa.RecordBatchReader]]:
     """
-    Creates a wrapper to append columns to the unarchived stream building them
+    Creates a wrapper to append columns to the unarchived stream, building them
     based on columns_shape.
 
     Args:
-        unarchived_stream: (file_name, file_size, reader) tuples.
-        reader: RecordBatchReader instance that references to the data.
-        columns_shape: the dictionary that is used to create columns.
-        append_file_name: if True, appends a `_source_file_name` column
-            containing the name of the file from the zip file
+        unarchived_stream: (file_name, record_batch_reader, validation_status)
+            tuples.
+        columns_shape: the dictionary {column_name: pyarrow.scalar} that is used 
+            to build columns.
+        append_file_name: wheter to append a _source_file_name column containing
+            the name of the source file.
+        append_file_validation_status: whether to append a schema validation status
+            column.
     """
-    for file_name, record_batch_reader, verification_status in unarchived_stream:
+    for file_name, record_batch_reader, validation_status in unarchived_stream:
         current_schema = record_batch_reader.schema
         columns_shape_copy = columns_shape.copy()
 
         if append_file_name:
             columns_shape_copy["_source_file_name"] = pa.scalar(file_name, pa.string())
-        
-        if append_file_name:
-            columns_shape_copy["_verification_status"] = pa.scalar(verification_status, pa.string())
+
+        if append_file_validation_status:
+            columns_shape_copy["_validation_status"] = pa.scalar(
+                validation_status, pa.string()
+            )
 
         new_schema = pa.schema(
             list(current_schema)
@@ -109,29 +121,24 @@ def add_columns_to_unarchived_stream(
         reader_with_metadata = pa.RecordBatchReader.from_batches(
             schema=new_schema, batches=batches_gen
         )
-        yield file_name, reader_with_metadata, verification_status
+        yield file_name, reader_with_metadata, validation_status
 
 
 def upload_unarchived_zip_stream_to_s3(
-    unarchived_stream: Iterator[tuple[bytes, int, pa.RecordBatchReader]],
+    unarchived_stream: Iterator[tuple[str, int, pa.RecordBatchReader]],
     s3fs: fs.S3FileSystem,
     bucket: str,
     source_key: str,
 ) -> None:
     """
     Consumes chunks from unarchived_stream and uploads them as Parquet to S3.
-    It also checks the actual file schema against expected_schema. If the schemas
-    don't match, the key will be built with the _UNVERIFIED (config/bronze/
-    bronze_config.py) prefix, otherwise _VERIFIED.
     """
 
-    metadata_columns = set(metadata_columns or [])
-
-    for file_name, record_batch_reader, verification_status in unarchived_stream:
+    for file_name, record_batch_reader, validation_status in unarchived_stream:
 
         key = build_bronze_key(
             landing_key=source_key,
-            verification_status=verification_status,
+            validation_status=validation_status,
         )
 
         pa_dataset.write_dataset(

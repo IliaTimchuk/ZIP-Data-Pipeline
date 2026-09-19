@@ -52,7 +52,7 @@ def main():
         unarchived_stream=unarchived_stream,
         columns_shape=airflow_metadata_columns,
         append_file_name=True,
-        append_file_verification_status=True,
+        append_file_validation_status=True,
     )
 
     unzip.upload_unarchived_zip_stream_to_s3(

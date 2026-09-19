@@ -1,9 +1,9 @@
 import os
+import json
 import pyarrow as pa
 import pyarrow.csv as pa_csv
 import pyarrow.json as pa_json
-from typing import Iterator
-
+from typing import IO
 import settings.pipeline_config as conf
 
 
@@ -11,57 +11,79 @@ class UnsupportedFileExtensionError(Exception):
     """Raised when a file inside the ZIP has an extension that has no readers."""
 
 
-def get_unexpected_columns(batch: pa.RecordBatch, expected_schema: pa.Schema):
-    return [n for n in batch.schema.name if n not in expected_schema.names]
+class JsonTooLargeError(Exception):
+    """The size of the JSON file exceeds the maximum allowed limit."""
 
 
-def open_string_json(
-    json_iterator: Iterator[bytes], expected_schema: pa.Schema
-) -> tuple[pa.RecordBatchReader, str]:
+def _read_iterator(iterator_file_like: IO[bytes], limit=1 * 1024 * 1024):
+    """Buffers the whole iterator if it is under the limit."""
+    buffer = iterator_file_like.read(limit + 1)
+
+    if len(buffer) > limit:
+        raise JsonTooLargeError(f"JSON member exceeds the {limit} byte in-memory limit")
+
+    return buffer
+
+
+def open_string_json(json_iterator: IO[bytes]) -> pa.RecordBatchReader:
     """
-    Wraps pyarrow.open_json, casting all data to strings.
-    pyarrow.open_json documentation:
-        https://arrow.apache.org/docs/python/generated/pyarrow.json.open_json.html
+    Reads the full JSON file into memory (up to MAX_JSON_SIZE_BYTES) and converts
+    it to pyarrow.RecordBatchReader. Parses all numbers (integers and floats) as
+    text strings to avoid missing digits.
     """
 
-    options = pa_json.ParseOptions(
-        explicit_schema=expected_schema,
-        unexpected_field_behavior="infer",
-    )
+    raw_json = _read_iterator(json_iterator, limit=conf.MAX_JSON_SIZE_BYTES)
+    json_records = json.loads(raw_json, parse_float=str, parse_int=str)
 
-    record_batch_reader = pa_json.open_json(
-        file_path=json_iterator, parse_options=options
-    )
+    if isinstance(json_records, dict):
+        json_records = [json_records]
+
+    table = pa.Table.from_pylist(json_records)
+    record_batch_reader = table.to_reader()
+    return record_batch_reader
 
 
+def open_string_csv(file_source: IO[bytes]) -> pa.RecordBatchReader:
+    """
+    Opens a streaming reader of CSV data using configured pyarrow.csv.open_csv
+    fucntion. All unexpected columns default to strings.
 
-def open_string_csv(
-    file_source: Iterator[bytes], expected_schema: pa.Schema
-) -> tuple[pa.RecordBatchReader, str]:
-    options = pa_csv.ConvertOptions(
-        default_column_type=pa.string(),
-        column_types=expected_schema,
-    )
+    pyarrow.csv.open_csv: https://arrow.apache.org/docs/python/generated/pyarrow.csv.open_csv.html
+    """
+    options = pa_csv.ConvertOptions(default_column_type=pa.string())
 
     record_batch_reader = pa_csv.open_csv(file_source, convert_options=options)
-
-    if record_batch_reader.schema != expected_schema:
-        return record_batch_reader, conf.UNVERIFIED_PREFIX
-
-    return record_batch_reader, conf.VERIFIED_PREFIX
+    return record_batch_reader
 
 
-def open_file_like(
-    file_iterator: Iterator[bytes], file_name: str, expected_schema: pa.Schema
-):
+def validate_schema(reader: pa.RecordBatchReader, expected_schema: pa.Schema) -> str:
+    """Resolves the prefix based on the reader schema matching the expected schema."""
+    actual_schema = reader.schema
+
+    if expected_schema.equals(actual_schema):
+        return conf.VERIFIED_PREFIX
+
+    return conf.UNVERIFIED_PREFIX
+
+
+_READERS = {
+    "csv": open_string_csv,
+    "json": open_string_json,
+}
+
+
+def open_file_like(file_iterator: IO[bytes], file_name: str) -> pa.RecordBatchReader:
+    """
+    Resolves a function to open a file by file extension. Unsupported extensions
+    raise UnsupportedFileExtensionError.
+    """
     extension = os.path.splitext(file_name)[1].lstrip(".").lower()
 
-    if extension == "csv":
-        return open_string_csv(file_iterator, expected_schema)
+    open_reader = _READERS.get(extension)
+    if not open_reader:
+        raise UnsupportedFileExtensionError(
+            f"Unsupported file extension: {extension}, file: {file_name}"
+        )
 
-    if extension == "json":
-        return open_string_json(file_iterator, expected_schema)
-
-    raise UnsupportedFileExtensionError(
-        f"Unsupported file extension: {extension}, file: {file_name}"
-    )
+    reader = open_reader(file_iterator)
+    return reader

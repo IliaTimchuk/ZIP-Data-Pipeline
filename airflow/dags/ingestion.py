@@ -126,7 +126,7 @@ def ingest_from_s3():
             """
 
             from airflow.providers.amazon.aws.hooks.s3 import S3Hook
-            from src.ingestion.upload_datasets import (
+            from src.ingestion.upload_dataset import (
                 upload_stream_to_s3,
                 validate_file_size,
             )

@@ -5,21 +5,21 @@ class BytesIteratorIO(io.RawIOBase):
 
     def __init__(self, iterator):
         self._iter = iterator
-        self._left = b''
+        self._left = b""
 
     def readable(self):
         return True
 
     def readinto(self, b):
         n = len(b)
-        view = memoryview(b).cast('B')
+        view = memoryview(b).cast("B")
         bytes_read = 0
 
         if self._left:
             chunk_size = len(self._left)
             if chunk_size <= n:
                 view[:chunk_size] = self._left
-                self._left = b''
+                self._left = b""
                 bytes_read += chunk_size
                 n -= chunk_size
             else:
@@ -49,8 +49,8 @@ class BytesIteratorIO(io.RawIOBase):
     def read(self, n=-1):
         """Fallback for operations that don't support readinto."""
         if n is None or n < 0:
-            res = self._left + b''.join(self._iter)
-            self._left = b''
+            res = self._left + b"".join(self._iter)
+            self._left = b""
             return res
 
         b = bytearray(n)
