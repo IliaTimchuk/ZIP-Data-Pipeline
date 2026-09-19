@@ -34,8 +34,8 @@ There are three tasks in <code>ingest_from_s3</code>. The second and third tasks
 <div style="height: 16px;"></div>
 
 ### **Bronze (in-progress)**
-<p>The main goal of Bronze layer is to decompress raw extracted ZIP files in chunks and load them into the Bronze bucket as Parquet, appending metadata columns and validating each file's schema.</p>
-<p>Bronze transformation using PyArrow as the main engine. Each file is transformed in a dedicated Docker container.
+<p>The main goal of the Bronze layer is to decompress raw extracted ZIP files in chunks, append metadata columns, validate each file's schema, and load them into the Bronze bucket as Parquet.</p>
+<p>Bronze transformation uses PyArrow as the main engine. Each file is transformed in a dedicated Docker container.
 This approach was chosen because ZIP files are unsplittable, so Spark cannot split and process a single ZIP file across its cluster. By combining Docker and PyArrow instead, the bronze layer achieves fast, lightweight processing while completely avoiding Spark overhead. Decompression in chunks guarantees that any file, regardless of size, can be decompressed.</p>
 
 #### **The bronze_zip_to_parquet DAG**

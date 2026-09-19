@@ -6,7 +6,7 @@ from stream_unzip import stream_unzip
 from collections import deque
 from typing import Iterator
 
-import bronze.readers as readers
+import src.bronze.readers as readers
 from src.utils.build_layer_key import build_bronze_key
 from src.bronze.io_wrapper import BytesIteratorIO
 
@@ -55,7 +55,7 @@ def get_unarchived_stream(
                 file_like_iterator, file_name
             ) as record_batch_reader:
 
-                validation_prefix = readers.validate_schema(
+                validation_status = readers.validate_schema(
                     record_batch_reader, expected_schema
                 )
                 yield file_name, record_batch_reader, validation_status

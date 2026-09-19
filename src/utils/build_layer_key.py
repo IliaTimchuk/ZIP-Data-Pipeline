@@ -18,7 +18,7 @@ def build_landing_key(source_name: str, source_key: str, dataset_name: str, date
     return landing_key
 
 
-def build_bronze_key(landing_key: str, verification_status: str = None) -> str:
+def build_bronze_key(landing_key: str, validation_status: str = None) -> str:
     """
     Builds a bronze key based on the landing_key and BRONZE_KEY_TEMPLATE from
     settings/pipeline_config.py.
@@ -28,7 +28,7 @@ def build_bronze_key(landing_key: str, verification_status: str = None) -> str:
         source_name=source_name,
         dataset_name=dataset_name,
         landing_date=date,
-        verification_status=verification_status,
+        validation_status=validation_status,
         file_stem=posixpath.splitext(file_name)[0],
     )
     return bronze_key

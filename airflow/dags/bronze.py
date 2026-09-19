@@ -1,13 +1,11 @@
 import os
 import settings.pipeline_config as conf
 from docker.types import Mount
-from airflow.sdk import dag, task, literal
+from airflow.sdk import dag, task
 from airflow.providers.docker.operators.docker import DockerOperator
 from airflow.providers.smtp.notifications.smtp import SmtpNotifier
 from datetime import datetime, timedelta
 from settings.airflow_assets import LANDING_ASSET
-
-AIRFLOW_PROJ_DIR = os.environ["AIRFLOW_PROJ_DIR"]
 
 default_args = {
     "owner": "IliaTimchuk",
@@ -15,6 +13,19 @@ default_args = {
     "retry_delay": timedelta(minutes=5),
     "on_failure_callback": [SmtpNotifier(to=conf.ALERT_EMAILS)],
 }
+
+
+def bronze_private_env() -> dict[str, str]:
+    env = {
+        "AWS_ACCESS_KEY_ID": os.environ["AWS_ACCESS_KEY_ID"],
+        "AWS_SECRET_ACCESS_KEY": os.environ["AWS_SECRET_ACCESS_KEY"],
+    }
+
+    endpoint = os.environ.get("AWS_ENDPOINT")
+    if endpoint:
+        env["AWS_ENDPOINT"] = endpoint
+
+    return env
 
 
 @dag(
@@ -54,16 +65,11 @@ def bronze_zip_to_parquet():
         task_id="bronze_transformation",
         image="pyarrow-custom",
         command=["python", "-m", conf.BRONZE_ENTRYPOINT_MODULE],
-        mounts=[
-            Mount(target="/src", source=f"{AIRFLOW_PROJ_DIR}/src", type="bind"),
-            Mount(
-                target="/settings", source=f"{AIRFLOW_PROJ_DIR}/settings", type="bind"
-            ),
-            Mount(target=literal("/.env"), source=literal(f"{AIRFLOW_PROJ_DIR}/.env"), type="bind"),
-        ],
+        private_environment=bronze_private_env(),
         auto_remove="success",
         mount_tmp_dir=False,
-        network_mode=os.environ["DOCKER_NETWORK_NAME"]
+        network_mode=os.environ.get("DOCKER_NETWORK_NAME", "zip-data-pipeline_default"),
+        max_active_tis_per_dag=4,
     ).expand(environment=files_to_transform)
 
 

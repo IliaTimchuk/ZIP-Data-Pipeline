@@ -180,7 +180,9 @@
         /opt/spark/bin/spark-class org.apache.spark.deploy.history.HistoryServer
 
     pyarrow-build:
-      build: ./docker/pyarrow
+      build:
+        context: .
+        dockerfile: docker/pyarrow/Dockerfile
       image: pyarrow-custom
     
     postgres-test:
