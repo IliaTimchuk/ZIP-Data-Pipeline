@@ -16,7 +16,7 @@
 # DATASET_NAME = "test-dataset"
 # DATASET_SCHEMA = ["id", "name", "score", "is_active"]
 # FILE_NAME = "file.zip"
-# SOURCE_KEY = f"test_data/{DATASET_NAME}/date=2026-01-01/{FILE_NAME}"
+# SOURCE_KEY = f"test_data/{DATASET_NAME}/ingest_date=2026-01-01/{FILE_NAME}"
 # DESTINATION_BUCKET = "bronze"
 
 
@@ -38,12 +38,6 @@
 
 
 # @pytest.fixture
-# def bronze_processed_at():
-#     bronze_time = datetime(2026, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
-#     return str(int(bronze_time.timestamp() * 1000))
-
-
-# @pytest.fixture
 # def bronze_env(monkeypatch, moto_server):
 #     monkeypatch.setenv("LANDING_BUCKET", SOURCE_BUCKET)
 #     monkeypatch.setenv("LANDING_KEY", SOURCE_KEY)
@@ -59,15 +53,3 @@
 #     client.create_dir(SOURCE_BUCKET)
 #     client.create_dir(DESTINATION_BUCKET)
 #     yield client
-
-
-# @pytest.fixture
-# def test_zip_file():
-#     def _create_zip_file(data: str, zipped_file_name: str):
-#         file = io.BytesIO()
-#         with zipfile.ZipFile(file, "w", zipfile.ZIP_DEFLATED) as zf:
-#             zf.writestr(zipped_file_name, data)
-#         file.seek(0)
-#         return file
-
-#     return _create_zip_file

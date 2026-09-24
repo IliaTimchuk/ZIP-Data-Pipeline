@@ -11,8 +11,12 @@ class UnsupportedFileExtensionError(Exception):
     """Raised when a file inside the ZIP has an extension that has no readers."""
 
 
+class EmptyFileError(Exception):
+    """Raised when the file is empty."""
+
+
 class JsonTooLargeError(Exception):
-    """The size of the JSON file exceeds the maximum allowed limit."""
+    """Raised when the size of the JSON file exceeds the maximum allowed limit."""
 
 
 def _read_iterator(iterator_file_like: IO[bytes], limit=1 * 1024 * 1024):
@@ -33,10 +37,17 @@ def open_string_json(json_iterator: IO[bytes]) -> pa.RecordBatchReader:
     """
 
     raw_json = _read_iterator(json_iterator, limit=conf.MAX_JSON_SIZE_BYTES)
+
+    if not raw_json.strip():
+        raise EmptyFileError("The json file is empty.")
+
     json_records = json.loads(raw_json, parse_float=str, parse_int=str)
 
     if isinstance(json_records, dict):
         json_records = [json_records]
+
+    if not any(json_records):
+        raise EmptyFileError("The JSON file has no records with data.")
 
     table = pa.Table.from_pylist(json_records)
     record_batch_reader = table.to_reader()
@@ -52,8 +63,13 @@ def open_string_csv(file_source: IO[bytes]) -> pa.RecordBatchReader:
     """
     options = pa_csv.ConvertOptions(default_column_type=pa.string())
 
-    record_batch_reader = pa_csv.open_csv(file_source, convert_options=options)
-    return record_batch_reader
+    try:
+        record_batch_reader = pa_csv.open_csv(file_source, convert_options=options)
+        return record_batch_reader
+    except pa.ArrowInvalid as e:
+        if "Empty CSV file" in str(e):
+            raise EmptyFileError("The CSV file is empty") from e
+        raise
 
 
 def validate_schema(reader: pa.RecordBatchReader, expected_schema: pa.Schema) -> str:

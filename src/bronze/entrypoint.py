@@ -31,8 +31,8 @@ def main():
     context = bronze_context.get_context()
     expected_schema = bronze_schemas[context["dataset_name"]]
 
-    source_s3_client = boto3.client("s3", endpoint_url=context["aws_endpoint_url"])
-    upload_s3_client = S3FileSystem(endpoint_override=context["aws_endpoint_url"])
+    source_s3_client = boto3.client("s3", endpoint_url=context["aws_endpoint"])
+    upload_s3_client = S3FileSystem(endpoint_override=context["aws_endpoint"])
 
     source_stream = get_s3_object_iterator(
         s3_client=source_s3_client,

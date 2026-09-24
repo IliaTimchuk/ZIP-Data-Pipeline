@@ -35,15 +35,32 @@ BRONZE_ENTRYPOINT_MODULE = "src.bronze.entrypoint"
 # The max size in bytes for the each decompressed JSON, -1 unlimited.
 MAX_JSON_SIZE_BYTES = 8 * 1024 * 1024
 
+# The Parquet layout of the bronze files, tuned for the Spark silver layer:
+# files of roughly 128-512 MB, row groups of roughly 64-128 MB so that Spark can
+# split large files on row-group boundaries. The row counts depend on the average
+# row width.
+PARQUET_MAX_ROWS_PER_FILE = 5_000_000
+PARQUET_MAX_ROWS_PER_GROUP = 1_000_000
+PARQUET_MIN_ROWS_PER_GROUP = 500_000
+
 
 # CONSTANTS
 # !!! NOT RECOMMENDED TO CHANGE !!!
 
-# These are used to build a key for each layer.
-LANDING_KEY_TEMPLATE = "{source_name}/{dataset_name}/date={date}/{file_name}"
+# These templates are used to build a key for each layer.
+LANDING_KEY_TEMPLATE = "{source_name}/{dataset_name}/ingest_date={date}/{file_name}"
+
+# The bronze key of a ZIP holds all of its output and the _SUCCESS marker. It is
+# wiped before each run.
 BRONZE_KEY_TEMPLATE = (
-    "{source_name}/{dataset_name}/{landing_date}/status={validation_status}/{file_stem}"
+    "{source_name}/{dataset_name}/ingest_date={date}/zip_name={zip_stem}"
 )
+BRONZE_VALIDATION_STATUS_KEY_TEMPLATE = (
+    "{bronze_key}/schema_status={validation_status}"
+)
+
+# Written to the bronze key of a ZIP once its transformation is fully completed.
+BRONZE_SUCCESS_MARKER = "_SUCCESS"
 
 # Validation prefixes used in Bronze bucket keys. Resolved by schema validation.
 VERIFIED_PREFIX = "verified"

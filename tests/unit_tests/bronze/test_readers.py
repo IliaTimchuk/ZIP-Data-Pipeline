@@ -1,41 +1,10 @@
 import io
 import pytest
 import pyarrow as pa
-import json
-import csv
 from unittest.mock import MagicMock, patch
 
 import src.bronze.readers as readers
 import settings.pipeline_config as conf
-
-
-@pytest.fixture
-def make_json_file():
-    """Returns an IO[bytes] stream containing JSON data."""
-
-    def _make_json_file(content: dict) -> io.BytesIO:
-        raw_bytes = json.dumps(content).encode("utf-8")
-        return io.BytesIO(raw_bytes)
-
-    return _make_json_file
-
-
-@pytest.fixture
-def make_csv_file():
-    """Returns an IO[bytes] stream containing CSV data."""
-
-    def _make_csv_file(rows: list, headers: list = None) -> io.BytesIO:
-        string_buffer = io.StringIO()
-        writer = csv.writer(string_buffer)
-        if headers:
-            writer.writerow(headers)
-        writer.writerows(rows)
-
-        raw_bytes = string_buffer.getvalue().encode("utf-8")
-        return io.BytesIO(raw_bytes)
-
-    return _make_csv_file
-
 
 # open_string_json
 
@@ -111,7 +80,23 @@ def test_open_string_json_parses_nulls(make_json_file):
     table = reader.read_all()
 
     assert table.to_pydict() == {"user_id": ["1", "1"], "balance": [None, "1222.33"]}
-    assert table.schema == expected_schema
+    assert table.schema.equals(expected_schema)
+
+
+@pytest.mark.parametrize(
+    "content",
+    [
+        pytest.param(b"", id="zero_bytes"),
+        pytest.param(b"  \n", id="whitespace_only"),
+        pytest.param(b"{}", id="empty_object"),
+        pytest.param(b"[]", id="empty_array"),
+        pytest.param(b"[{}]", id="array_of_empty_object"),
+    ],
+)
+def test_open_string_json_raises_on_file_without_data(content):
+    io_json = io.BytesIO(content)
+    with pytest.raises(readers.EmptyFileError):
+        readers.open_string_json(io_json)
 
 
 # _read_iterators
@@ -146,18 +131,37 @@ def test_open_string_csv_unexpected_columns_are_strings(make_csv_file):
         ["1", "1222.33", "12.09.2025"],
         ["2", "134.0", "12.01.2026"],
     ]
+    expected_schema = pa.schema(
+        [
+            pa.field("user_id", pa.string()),
+            pa.field("balance", pa.string()),
+            pa.field("unexpected_metadata", pa.string()),
+        ]
+    )
 
     io_csv = make_csv_file(rows=csv_content, headers=csv_headers)
 
     reader = readers.open_string_csv(io_csv)
     table = reader.read_all()
 
-    assert table.schema.field("unexpected_metadata").type == pa.string()
+    assert table.schema.equals(expected_schema)
     assert table.to_pydict() == {
         "user_id": ["1", "2"],
         "balance": ["1222.33", "134.0"],
         "unexpected_metadata": ["12.09.2025", "12.01.2026"],
     }
+
+@pytest.mark.parametrize(
+    "content",
+    [
+        pytest.param(b"", id="zero_bytes"),
+        pytest.param(b"id", id="header_only_without_newline"),
+    ],
+)
+def test_open_string_csv_raises_on_file_without_data(content):
+    io_csv = io.BytesIO(content)
+    with pytest.raises(readers.EmptyFileError):
+        readers.open_string_csv(io_csv)
 
 
 # open_file_like

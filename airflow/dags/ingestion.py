@@ -122,7 +122,7 @@ def ingest_from_s3():
             data bucket, in chunks. It also checks the uploaded object's size
             against the size on the source platform, deletes it if the size
             mismatches. Builds the following landing key:
-            bucket/source_name/dataset_name/date=year-month-day/file_name.
+            bucket/source_name/dataset_name/ingest_date=year-month-day/file_name.
             """
 
             from airflow.providers.amazon.aws.hooks.s3 import S3Hook

@@ -13,13 +13,13 @@ def get_context() -> dict:
             "landing_key": os.environ["LANDING_KEY"],
             "dataset_name": os.environ["DATASET_NAME"],
             "destination_bucket": os.environ["DESTINATION_BUCKET"],
-            "aws_endpoint_url": os.getenv("AWS_ENDPOINT"),
+            "aws_endpoint": os.getenv("AWS_ENDPOINT"),
         }
         logger.info("The bronze context was succesfully extracted. Values: %s", context)
         return context
     except KeyError as e:
         raise KeyError(
-            f"The required environment variable(-s) was not provided: {e}"
+            f"The required environment variables were not provided: {e}"
         ) from e
 
 
