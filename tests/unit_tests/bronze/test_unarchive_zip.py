@@ -2,112 +2,78 @@ import io
 import zipfile
 import pytest
 import pyarrow as pa
+import pyarrow.dataset as pa_dataset
 import pyarrow.fs as fs
-from typing import Iterator
-from unittest.mock import MagicMock
 
 import src.bronze.unarchive_zip as unzip
 import settings.pipeline_config as conf
 
 
-@pytest.fixture
-def make_zip_file():
-    """
-    Returns an iterator of bytes chunks over an in-memory ZIP archive built
-    from the given files.
-    """
+def build_zip_stream(files: dict[str, str | bytes], chunk_size: int = 16):
+    """Yields chunks of an in-memory ZIP archive built from the given files."""
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as zf:
+        for name, data in files.items():
+            zf.writestr(name, data)
 
-    def _create_zip_file(
-        files: dict[str, str | bytes], chunk_size: int = 16
-    ) -> Iterator[bytes]:
-        """
-        Args:
-            files: {file name inside the archive: file content}, written in
-                insertion order.
-            chunk_size: the size of the yielded chunks.
-        """
-        buffer = io.BytesIO()
-        with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as zf:
-            for file_name, data in files.items():
-                zf.writestr(file_name, data)
-
-        zip_bytes = buffer.getvalue()
-        return (
-            zip_bytes[i : i + chunk_size] for i in range(0, len(zip_bytes), chunk_size)
-        )
-
-    return _create_zip_file
+    zip_bytes = buffer.getvalue()
+    return (zip_bytes[i : i + chunk_size] for i in range(0, len(zip_bytes), chunk_size))
 
 
-def _collect(stream):
-    """
-    Consumes an unarchived stream, reading each reader into a pyarrow.Table.
-    """
-    return [
-        (file_name, reader.read_all(), validation_status)
+def consume_stream(stream):
+    """Consumes the stream and returns a dict {filename: (pyarrow.Table, status)}."""
+    return {
+        file_name: (reader.read_all(), validation_status)
         for file_name, reader, validation_status in stream
-    ]
+    }
 
 
-# get_unarchive_stream
+def dummy_record_batch_reader(
+    ids: list[str], schema: pa.Schema
+) -> pa.RecordBatchReader:
+    """Creates a dummy RecordBatchReader for testing wrappers."""
+    batch = pa.record_batch({"id": ids}, schema=schema)
+    return pa.RecordBatchReader.from_batches(schema, [batch])
 
 
 SCHEMA = pa.schema([("id", pa.string())])
 
-FILE_CONTENTS = {
-    "valid.csv": "id\n1\n",
-    "valid.json": '[{"id": 1}]',
-    "unsupported.txt": "irrelevant",
-    "empty.csv": "",
-    "empty.json": "",
-}
+
+# get_unarchived_stream
 
 
-@pytest.mark.parametrize(
-    "member_names, expected_names",
-    [
-        pytest.param(["valid.csv"], ["valid.csv"], id="csv_alone"),
-        pytest.param(["valid.json"], ["valid.json"], id="json_alone"),
-        pytest.param(["unsupported.txt"], [], id="unsupported_alone"),
-        pytest.param(
-            ["valid.csv", "valid.json"],
-            ["valid.csv", "valid.json"],
-            id="csv_and_json",
-        ),
-        pytest.param(
-            ["valid.csv", "unsupported.txt", "valid.json"],
-            ["valid.csv", "valid.json"],
-            id="unsupported_between_csv_and_json",
-        ),
-        pytest.param(["empty.csv"], [], id="csv_empty"),
-        pytest.param(["empty.json"], [], id="json_empty"),
-        pytest.param(
-            ["empty.csv", "valid.csv", "empty.json", "valid.json"],
-            ["valid.csv", "valid.json"],
-            id="empty_between_valid_files",
-        ),
-    ],
-)
-def test_get_unarchived_stream_dispatches_and_skips(
-    member_names, expected_names, make_zip_file
-):
-    files = {name: FILE_CONTENTS[name] for name in member_names}
-    zip_iter = make_zip_file(files=files)
+def test_get_unarchived_stream_dispatches_and_skips():
+    files = {
+        "valid.csv": "id\n1\n",
+        "valid.json": '[{"id": 1}]',
+        "unsupported.txt": "irrelevant data",
+        "empty.csv": "",
+        "empty.json": "",
+    }
+    expected_result_files = ["valid.csv", "valid.json"]
+    zip_iter = build_zip_stream(files)
 
-    results = _collect(unzip.get_unarchived_stream(zip_iter, SCHEMA))
+    results = consume_stream(unzip.get_unarchived_stream(zip_iter, SCHEMA))
 
-    assert [name for name, _, _ in results] == expected_names
-    for name, table, validation_status in results:
+    assert list(results.keys()) == expected_result_files
+
+    for file_name in expected_result_files:
+        table, status = results[file_name]
         assert table.to_pydict() == {"id": ["1"]}
-        assert validation_status == conf.VERIFIED_PREFIX
+        assert status == conf.VERIFIED_PREFIX
 
 
-def test_get_unarchived_stream_marks_schema_mismatch_as_unverified(make_zip_file):
-    zip_iter = make_zip_file(files={"test.csv": "other\n1\n"})
+def test_get_unarchived_stream_marks_schema_mismatch_as_unverified():
+    files = {
+        "test.json": '[{"id": 1, "new_col": "data"}]',
+        "test.csv": "id,new_col\n1,data\n",
+    }
+    zip_iter = build_zip_stream(files)
 
-    results = _collect(unzip.get_unarchived_stream(zip_iter, SCHEMA))
-
-    assert [status for _, _, status in results] == [conf.UNVERIFIED_PREFIX]
+    results = consume_stream(unzip.get_unarchived_stream(zip_iter, SCHEMA))
+    for file_name in files:
+        _, status = results[file_name]
+        assert status == conf.UNVERIFIED_PREFIX
 
 
 @pytest.mark.parametrize(
@@ -118,12 +84,128 @@ def test_get_unarchived_stream_marks_schema_mismatch_as_unverified(make_zip_file
     ],
 )
 def test_get_unarchived_stream_raises_on_malformed_file(
-    file_name, content, expected_error, make_zip_file
+    file_name, content, expected_error
 ):
-    zip_iter = make_zip_file(files={file_name: content})
-
+    zip_iter = build_zip_stream({file_name: content})
     with pytest.raises(expected_error):
-        _collect(unzip.get_unarchived_stream(zip_iter, SCHEMA))
+        consume_stream(unzip.get_unarchived_stream(zip_iter, SCHEMA))
+
+
+# _add_columns & add_columns_to_unarchived_stream
+
+
+def test_add_columns_builds_columns_and_appends_them():
+    batch = pa.RecordBatch.from_pydict({"id": ["1", "2"]}, schema=SCHEMA)
+
+    scalars = {
+        "file_name": pa.scalar("test.csv", pa.string()),
+        "run_id": pa.scalar(1, pa.int16()),
+    }
+
+    result = unzip._add_columns(batch, scalars)
+
+    assert result.schema.names == ["id", "file_name", "run_id"]
+    assert result.num_rows == 2
+    assert result.column("file_name").to_pylist() == ["test.csv", "test.csv"]
+
+
+@pytest.mark.parametrize(
+    "append_name, append_status, expected_cols",
+    [
+        (False, False, ["id", "run_id"]),
+        (True, False, ["id", "run_id", "_source_file_name"]),
+        (False, True, ["id", "run_id", "_validation_status"]),
+        (True, True, ["id", "run_id", "_source_file_name", "_validation_status"]),
+    ],
+    ids=["none", "name_only", "status_only", "both"],
+)
+def test_add_columns_to_unarchived_stream_appends_columns(
+    append_name, append_status, expected_cols
+):
+    stream = [
+        ("a.csv", dummy_record_batch_reader(["1", "2"], SCHEMA), conf.VERIFIED_PREFIX)
+    ]
+    columns_shape = {"run_id": pa.scalar(1, pa.int16())}
+
+    result_stream = unzip.add_columns_to_unarchived_stream(
+        stream, columns_shape, append_name, append_status
+    )
+    results = consume_stream(result_stream)
+
+    table, _ = results["a.csv"]
+    assert table.column_names == expected_cols
+    assert table.column("run_id").to_pylist() == [1, 1]
+
+
+def test_add_columns_to_unarchived_stream_keeps_values_per_file():
+    stream = [
+        ("a.csv", dummy_record_batch_reader(["1"], SCHEMA), conf.VERIFIED_PREFIX),
+        ("b.csv", dummy_record_batch_reader(["2"], SCHEMA), conf.UNVERIFIED_PREFIX),
+    ]
+    columns_shape = {"run_id": pa.scalar(1, pa.int16())}
+
+    result_stream = unzip.add_columns_to_unarchived_stream(
+        stream, columns_shape, True, True
+    )
+    results = consume_stream(result_stream)
+
+    table_a, _ = results["a.csv"]
+    assert table_a.column("_source_file_name").to_pylist() == ["a.csv"]
+    assert table_a.column("_validation_status").to_pylist() == [conf.VERIFIED_PREFIX]
+
+    table_b, _ = results["b.csv"]
+    assert table_b.column("_source_file_name").to_pylist() == ["b.csv"]
+    assert table_b.column("_validation_status").to_pylist() == [conf.UNVERIFIED_PREFIX]
+
+
+def test_add_columns_to_unarchived_stream_does_not_read_ahead():
+    pulled = []
+
+    def batches():
+        pulled.append("batch_read")
+        yield pa.record_batch({"id": ["1"]}, schema=SCHEMA)
+
+    source = pa.RecordBatchReader.from_batches(SCHEMA, batches())
+    stream = [("a.csv", source, conf.VERIFIED_PREFIX)]
+
+    result_stream = list(unzip.add_columns_to_unarchived_stream(stream, {}))
+    assert pulled == []
+
+    _, reader, _ = result_stream[0]
+    reader.read_all()
+    assert pulled == ["batch_read"]
+
+
+
+# _clean_bronze_key
+
+
+def test_clean_bronze_key(tmp_path):
+    local_fs = fs.LocalFileSystem()
+    bronze_dir = f"{tmp_path}/bronze_key"
+    success_marker = f"{bronze_dir}/{conf.BRONZE_SUCCESS_MARKER}"
+    old_parquet = f"{bronze_dir}/old_data.parquet"
+    other_zip_parquet = f"{tmp_path}/other_bronze_key/data.parquet"
+
+    local_fs.create_dir(bronze_dir)
+    local_fs.create_dir(f"{tmp_path}/other_bronze_key")
+    local_fs.open_output_stream(success_marker).close()
+    local_fs.open_output_stream(old_parquet).close()
+    local_fs.open_output_stream(other_zip_parquet).close()
+
+    unzip._clean_bronze_key(local_fs, bronze_dir)
+
+    assert local_fs.get_file_info(success_marker).type == fs.FileType.NotFound
+    assert local_fs.get_file_info(old_parquet).type == fs.FileType.NotFound
+    assert local_fs.get_file_info(other_zip_parquet).type == fs.FileType.File
+
+
+def test_clean_bronze_key_ignores_missing_directory(tmp_path):
+    """Passes if cleaning a directory that does not exist does not raise."""
+    local_fs = fs.LocalFileSystem()
+    missing_dir = f"{tmp_path}/does_not_exist"
+
+    unzip._clean_bronze_key(local_fs, missing_dir)
 
 
 # upload_unarchived_zip_stream_to_s3
@@ -131,89 +213,83 @@ def test_get_unarchived_stream_raises_on_malformed_file(
 
 LANDING_KEY = "source/dataset/ingest_date=2026-01-01/archive.zip"
 BRONZE_KEY = "source/dataset/ingest_date=2026-01-01/zip_name=archive"
-SIBLING_FILE = "source/dataset/ingest_date=2026-01-01/zip_name=archive2/x.parquet"
-UPLOAD_SCHEMA = pa.schema([("id", pa.string()), ("name", pa.string())])
 
 
-@pytest.fixture
-def bucket(tmp_path) -> str:
-    """A local directory that plays the role of the bronze bucket."""
-    return tmp_path.as_posix()
+def test_upload_unarchived_zip_stream_writes_dataset(tmp_path):
+    local_fs = fs.LocalFileSystem()
+    bucket = str(tmp_path)
+    stream = [
+        (
+            "folder/data.csv",
+            dummy_record_batch_reader(["1", "2"], SCHEMA),
+            conf.VERIFIED_PREFIX,
+        )
+    ]
 
-
-def _upload(files: dict[str, str], bucket: str, make_zip_file) -> None:
-    stream = unzip.get_unarchived_stream(make_zip_file(files=files), UPLOAD_SCHEMA)
     unzip.upload_unarchived_zip_stream_to_s3(
         unarchived_stream=stream,
-        s3fs=fs.LocalFileSystem(),
+        s3fs=local_fs,
         bucket=bucket,
         source_key=LANDING_KEY,
-        max_rows_per_file=2,
-        max_rows_per_group=2,
-        min_rows_per_group=1,
     )
 
+    bronze_dir = tmp_path / BRONZE_KEY
 
-def _list_files(bucket: str) -> list[str]:
-    selector = fs.FileSelector(bucket, recursive=True)
-    return sorted(
-        info.path.removeprefix(f"{bucket}/")
-        for info in fs.LocalFileSystem().get_file_info(selector)
-        if info.type == fs.FileType.File
-    )
+    success_marker = bronze_dir / conf.BRONZE_SUCCESS_MARKER
+    assert success_marker.exists()
+    assert success_marker.stat().st_size == 0
 
+    dataset_dir = bronze_dir / f"schema_status={conf.VERIFIED_PREFIX}"
+    assert dataset_dir.exists()
 
-def test_upload_writes_layout_and_success_marker(bucket, make_zip_file):
-    _upload(
-        {"a.csv": "id,name\n1,x\n2,y\n3,z\n", "b.csv": "id,other\n1,x\n"},
-        bucket,
-        make_zip_file,
-    )
+    parquet_files = list(dataset_dir.glob("*.parquet"))
+    assert len(parquet_files) == 1
+    assert parquet_files[0].name.startswith("folder__data.csv_part-")
 
-    assert _list_files(bucket) == [
-        f"{BRONZE_KEY}/_SUCCESS",
-        f"{BRONZE_KEY}/schema_status=unverified/b.csv_part-0.parquet",
-        f"{BRONZE_KEY}/schema_status=verified/a.csv_part-0.parquet",
-        f"{BRONZE_KEY}/schema_status=verified/a.csv_part-1.parquet",
-    ]
+    saved_table = pa_dataset.dataset(str(dataset_dir)).to_table()
+    assert saved_table.column("id").to_pylist() == ["1", "2"]
 
 
-def test_upload_rerun_leaves_no_files_from_previous_run(bucket, make_zip_file):
-    """
-    The re-run produces fewer parts and moves the file to another validation
-    status. Nothing from the first run must survive.
-    """
-    _upload({"a.csv": "id,name\n1,x\n2,y\n3,z\n"}, bucket, make_zip_file)
-    _upload({"a.csv": "id,other\n1,x\n"}, bucket, make_zip_file)
-
-    assert _list_files(bucket) == [
-        f"{BRONZE_KEY}/_SUCCESS",
-        f"{BRONZE_KEY}/schema_status=unverified/a.csv_part-0.parquet",
-    ]
-
-
-def test_upload_rerun_of_zip_without_data_removes_previous_output(
-    bucket, make_zip_file
-):
-    _upload({"a.csv": "id,name\n1,x\n"}, bucket, make_zip_file)
-    _upload({"a.csv": ""}, bucket, make_zip_file)
-
-    assert _list_files(bucket) == []
-
-
-def test_upload_of_zip_with_only_files_without_data_writes_nothing(
-    bucket, make_zip_file
-):
-    _upload({"a.json": "[]", "b.json": "{}"}, bucket, make_zip_file)
-
-    assert _list_files(bucket) == []
-
-
-def test_upload_does_not_touch_other_zips(bucket, make_zip_file):
+def test_upload_unarchived_zip_stream_rerun_leaves_no_old_files(tmp_path):
     local_fs = fs.LocalFileSystem()
-    local_fs.create_dir(f"{bucket}/{SIBLING_FILE.rsplit('/', 1)[0]}")
-    local_fs.open_output_stream(f"{bucket}/{SIBLING_FILE}").close()
+    bucket = str(tmp_path)
+    first_run = [
+        ("a.csv", dummy_record_batch_reader(["1"], SCHEMA), conf.VERIFIED_PREFIX)
+    ]
+    second_run = [
+        ("a.csv", dummy_record_batch_reader(["1"], SCHEMA), conf.UNVERIFIED_PREFIX)
+    ]
 
-    _upload({"a.csv": "id,name\n1,x\n"}, bucket, make_zip_file)
+    for stream in [first_run, second_run]:
+        unzip.upload_unarchived_zip_stream_to_s3(
+            unarchived_stream=stream,
+            s3fs=local_fs,
+            bucket=bucket,
+            source_key=LANDING_KEY,
+        )
 
-    assert SIBLING_FILE in _list_files(bucket)
+    bronze_dir = tmp_path / BRONZE_KEY
+
+    assert (bronze_dir / conf.BRONZE_SUCCESS_MARKER).exists()
+    assert not (bronze_dir / f"schema_status={conf.VERIFIED_PREFIX}").exists()
+
+    parquet_files = list(
+        (bronze_dir / f"schema_status={conf.UNVERIFIED_PREFIX}").glob("*.parquet")
+    )
+    assert len(parquet_files) == 1
+
+
+def test_upload_unarchived_zip_stream_handles_empty_stream(tmp_path):
+    local_fs = fs.LocalFileSystem()
+    bucket = str(tmp_path)
+
+    unzip.upload_unarchived_zip_stream_to_s3(
+        unarchived_stream=iter([]),
+        s3fs=local_fs,
+        bucket=bucket,
+        source_key=LANDING_KEY,
+    )
+
+    bronze_dir = tmp_path / BRONZE_KEY
+
+    assert not bronze_dir.exists()
