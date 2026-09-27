@@ -8,7 +8,7 @@
 
 <p>ZIP-Data-Pipeline is an end-to-end ELT pipeline that turns ZIP archives from external S3 buckets into analytics-ready data marts in ClickHouse through a layered data lakehouse architecture.</p>
 
-![The ZIP-Data-Pipeline architecture](./docs/images/architecture-overview.png)
+![The ZIP-Data-Pipeline architecture](./docs/images/architecture-overview.svg)
 
 ## **Why this project exists**
 <p>ZIP archives are one of the most common ways to publish bulk data and one of the least convenient to process. They cannot be split for parallel processing, their file index sits at the end of the archive, and one archive often contains different file formats.</p>
@@ -17,10 +17,9 @@
 
 - Archives of any size are processed without being loaded into memory.
 - Files that do not match the expected schema are kept separately instead of being dropped.
-- Re-running the pipeline never duplicates data.
-- Downstream layers read only archives that were fully processed.
+- Re-running the pipeline never duplicates data, and each archive is marked as complete only after it is fully processed.
 - Every row can be traced back to its archive, source file, and pipeline run.
-- New data sources are added through configuration, without code changes.
+- Data sources are declared in a configuration file rather than in code.
 
 <p>The pipeline follows the medallion architecture: Landing keeps raw data, Bronze turns raw archives into validated Parquet, Silver cleans the data into Apache Iceberg tables, and Gold builds and publishes data marts to ClickHouse.</p>
 
@@ -55,11 +54,11 @@ The ingestion layer is represented by the <code>[ingest_from_s3](airflow/dags/in
 | Each ZIP is streamed from S3 and decompressed file by file in chunks with PyArrow, in its own Docker container instead of Spark. | ZIP files are unsplittable, so Spark cannot process one archive in parallel. One lightweight container per ZIP gives parallelism across archives without Spark's overhead, and streaming keeps memory use independent of the archive size. |
 | All CSV data and JSON numeric data are read as strings. | Keeping data as strings avoids type inference losing data. If a cast rule changes, Silver can re-cast from Bronze without decompressing the ZIP archives again. |
 | Each file is validated against the expected schema and written under `schema_status=valid` or `schema_status=invalid`. Invalid files are kept in quarantine instead of being dropped, and an alert is sent for them. | Silver and Gold expect an exact schema. A mismatching file could fail their jobs or be processed silently and put wrong data into the data marts. Quarantine keeps such files out of the valid path, loses no data, and lets them be reprocessed once the schema is updated. |
-| Empty files inside a ZIP archive are skipped, while a file that cannot be parsed fails the transformation of the entire archive. | An empty file does not throw an exception, while wrong data are never discarded silently. |
 | The key of the ZIP archive within the destination bucket is cleaned before writing the data. | Re-runs of the transformation never duplicate data. |
 | A `_SUCCESS` marker is written under the key of the ZIP archive as the last step of the transformation. | The marker confirms that the transformation of the entire archive was completed. If the transformation is interrupted, the marker is never written, so Silver can distinguish complete ZIP archives from partial ones. |
 | Lineage columns are added to every row: DAG run id, processing time, ZIP name, source file name and schema status. | Every row can be traced back to its archive, file and pipeline run. |
 | CSV files are read in chunks, while each JSON file is loaded into memory entirely, up to a configured size limit (8 MB by default). A JSON file above the limit fails the transformation of the entire archive. | PyArrow's JSON reader supports only newline-delimited JSON, while source files may contain a single object or an array of records. The size limit protects the container's memory from unexpectedly large JSON files. |
+| Empty files inside a ZIP archive are skipped, while a file that cannot be parsed fails the transformation of the entire archive. | Empty files are expected behavior of the source systems and therefore do not raise an exception. Malformed files indicate a defect in the source data, so they are never discarded silently. |
 | Parquet files and row groups are sized for Spark (files of ~128–512 MB, row groups of ~64–128 MB). | Silver's Spark jobs can split large files on row-group boundaries. |
 
 
