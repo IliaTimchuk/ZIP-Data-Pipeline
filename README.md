@@ -15,14 +15,12 @@ The ELT pipeline that ingests ZIP files from S3 buckets, decompresses them, and 
 ## **Workflow**
 
 ### **Ingestion**
-The ingestion layer is represented by a DAG (<code>[ingest_from_s3](airflow/dags/ingestion.py)</code>) that extracts data from S3 buckets daily, and saves it to the MinIO Landing bucket. 
+The ingestion layer is represented by the (<code>[ingest_from_s3](airflow/dags/ingestion.py)</code>) DAG that extracts data from S3 buckets daily, and saves it to the MinIO Landing bucket. 
 
-![ingest_from_s3 architecture](./docs/images/ingest_from_s3-arhictecture.png)
+![ingest_from_s3 architecture](./docs/images/ingest_from_s3-arhictecture.svg)
 
-All data sources should be defined in a single YAML file (`settings/sources.yaml` by default). This is the main interface for adding, modifying, and managing sources. Each entry configures the data's location, authentication, DAGs that allowed to work with the source, and dynamic endpoint construction. A single source can feed multiple DAGs independently, and each source is validated individually to ensure that malformed configurations never break the rest of the pipeline.
+[All data sources should be defined in a single YAML file](settings/README.md) (`settings/sources.yaml` by default). This is the main interface for adding, modifying, and managing sources. Each entry configures the data's location, authentication, DAGs that allowed to work with the source, and dynamic endpoint constructi on. A single source can feed multiple DAGs independently, and each source is validated individually to ensure that malformed configurations never break the rest of the pipeline.
 
-Read more: 
-- [How to define and read sources?](settings/README.md)
 <div style="height: 16px;"></div>
 There are three tasks in <code>ingest_from_s3</code>. The second and third tasks are combined into the task group (`extract_files`) to create a 1-1 mapping. One instance of this task group is created per source/endpoint combination, so each instance handles exactly one (bucket, key) pair:
 
@@ -36,11 +34,54 @@ There are three tasks in <code>ingest_from_s3</code>. The second and third tasks
 <div style="height: 16px;"></div>
 
 ### **Bronze (in-progress)**
-Airflow spins up a separate container using DockerOperator, passing parameters through the .env file. The script with PyArrow inside decompresses extracted ZIP files in chunks (the entire file is never landed in the buffer), validates the schema of each file, adds metadata columns (`_bronze_processed_at`, `_dag_run_id`, `_zip_file`, `_source_file_name`), and writes the result as Parquet into the Bronze bucket in parts.
+<p>The main goal of the Bronze layer is to decompress raw extracted ZIP files in chunks, append metadata columns, validate each file's schema, and load them into the Bronze bucket as Parquet.</p>
+<p>Bronze transformation uses PyArrow as the main engine. Each file is transformed in a dedicated Docker container.
+This approach was chosen because ZIP files are unsplittable, so Spark cannot split and process a single ZIP file across its cluster. By combining Docker and PyArrow instead, the bronze layer achieves fast, lightweight processing while completely avoiding Spark overhead. Decompression in chunks guarantees that any file, regardless of size, can be decompressed.</p>
 
-This approach was chosen because ZIP files are unsplittable, meaning Apache Spark cannot process a single ZIP file in parallel. By combining Docker and PyArrow instead, the bronze layer achieves fast, lightweight processing while completely avoiding Spark overhead. Decompression in chunks guarantees that any file, regardless of size, can be decompressed.
+#### **The bronze_zip_to_parquet DAG**
+![Bronze DAG overview](./docs/images/bronze_zip_to_parquet-arqhitecture.svg)
 
-<div style="height: 16px;"></div>
+The [Bronze DAG](airflow/dags/bronze.py) uses Asset-Aware Scheduling, triggering automatically whenever the Landing asset is updated. There are two tasks, and the second is dynamically mapped so that each triggering asset event is processed independently:
+
+1. The first task (load_bronze_config) reads the triggering asset events for the Landing asset out of the task context and builds one environment-variable dictionary per landed file, containing the landing bucket, landing key, dataset name, destination (Bronze) bucket, and the DAG run id.
+2. The second task (bronze_transformation) is a dynamically mapped DockerOperator that spins up one Docker container per config entry produced by the first task, passing each dictionary in as environment variables. Each container runs the bronze entrypoint module, decompresses the corresponding ZIP file in chunks, validates its schema, adds metadata columns, and writes the result as Parquet into the Bronze bucket (read the next part for more details). Containers run on the default docker-compose network.
+
+#### **Bronze Transformation**
+<p>Each container runs through <a href="./src/bronze/entrypoint.py">bronze entrypoint</a>. Bronze transformation can be divided into the following steps:</p>
+
+<table>
+  <tr>
+    <td width="280" valign="top">
+      <img src="./docs/images/bronze-transformation.svg" alt="Bronze transformation overview">
+    </td>
+    <td valign="top">
+      <b>1. Context Reading.</b>
+      <p>The following environment variables are read:</p>
+      <ul>
+        <li><code>landing_bucket</code> – the bucket with the target ZIP file.</li>
+        <li><code>landing_key</code> – the target ZIP file key inside landing_bucket.</li>
+        <li><code>dataset_name</code> – is used to fetch an expected schema for the files inside the target ZIP file, which is represented by a pyarrow.Schema object.</li>
+        <li><code>destination_bucket</code> – the bucket to write final Parquet files.</li>
+      </ul>
+      <p>The metadata columns' values:</p> 
+      <ul> 
+        <li><code>_dag_run_id</code> – the Bronze DAG run_id, which is passed by the DAG as an environment variable. 
+        <li><code>_bronze_processed_at</code> – the timestamp in milliseconds</li>
+        <li><code>_zip_file_name</code> – the name of the target ZIP file that is processed.</li>
+      </ul>
+      <p><b>2. get_s3_object_iterator:</b> Creates an iterator over the target ZIP file inside S3 by given landing_bucket and landing_key using boto3 client.</p>
+      <p><b>3. get_unarchived_stream:</b> Initializes an unarchived stream, creating a wrapper around the iterator over a ZIP file.</p> 
+      <p> Processes a ZIP archive in chunks without loading the full archive into memory. Each decompressed file is converted to a file-like iterator, validated against the expected PyArrow schema, and converted into a pyarrow.RecordBatchReader. Files with unsupported extensions are skipped. The processing logic for each file's processing depends on the file type:</p>
+      <ul> 
+        <li><code>CSV</code> – streamed in chunks. Every column is read as string. 
+        <li><code>JSON</code> – loaded fully into memory (uses the limit <code>MAX_JSON_SIZES_BYTES</code>). All numeric data is read as string. </li>
+      </ul>
+      <p><b>4. add_columns_to_unarchived_stream:</b> Creates a wrapper to append the metadata columns to each chunk of the iterator. Maps each pyarrow.scalar by the number of rows inside a chunk and appends it as a new column.</p>
+      <p><b>5. upload_unarchived_zip_stream_to_s3:</b> Builds a target key under which the decompressed file is uploaded to the destination_bucket. The bronze keys use verification status by convention: <code>source_name/dataset_name/date=.../status=.../file_name/part-*.parquet</code>. The status is resolved by schema comparison. It compares every field in the file schema against the expected schema (including JSON nested structures). Once the key is built, it writes chunks as Parquet files to the destination_bucket under this key.</p>
+    </td>
+  </tr>
+</table>
+
 
 ### **Silver (planned)**
 Spark handles splittable Parquet files from the Bronze bucket. It cleans, transforms, and writes them as Apache Iceberg tables into the Silver bucket.
@@ -57,33 +98,36 @@ Spark handles Apache Iceberg tables from the Silver bucket, builds data marts us
 ```
 .
 ├── airflow/
-│   ├── config/
+│   ├── config/                          # airflow.cfg 
 │   ├── dags/
-│   │   └── ingestion.py
+│   │   ├── bronze.py                    # Bronze layer DAG
+│   │   └── ingestion.py                 # Ingestion DAG
 │   └── logs/
-├── settings/
-│   ├── README.md
-│   ├── pipeline_config.py
-│   ├── sources.yaml
-│   └── dataset_schemas.yaml
 ├── docker/                              # Custom Dockerfiles and image requirements
-├── scripts/
+├── settings/
+│   ├── schemas/
+│   │   └── bronze_schemas.py            # Bronze layer schema definitions
+│   ├── README.md
+│   ├── airflow_assets.py                # Airflow asset definitions
+│   ├── pipeline_config.py               # Main project configurations
+│   └── sources.yaml
+├── src/
 │   ├── bronze/
-│   │   ├── io_wrapper.py
-│   │   ├── read_dataset_schema.py
-│   │   ├── bronze_entrypoint.py         # Entrypoint for bronze containers
-│   │   └── unarchive_zip.py             # Bronze layer unarchiving logic
+│   │   ├── context.py                   # Bronze run context
+│   │   ├── entrypoint.py                # Entrypoint for bronze containers
+│   │   ├── io_wrapper.py                # File-like wrapper for iterators
+│   │   ├── readers.py                   # Unarchived files readers
+│   │   └── unarchive_zip.py             # Unarchivation logic
 │   ├── ingestion/
-│   │   ├── extract_datasets.py
-│   │   └── read_sources.py              # sources.yaml readers
+│   │   ├── read_sources.py              # sources.yaml readers
+│   │   └── upload_dataset.py
 │   ├── spark_jobs/
 │   └── utils/                           # Shared helpers
-        └── build_layer_key.py                           
+│       └── build_layer_key.py
 ├── tests/
 │   ├── dag_tests/
 │   ├── integration_tests/
 │   └── unit_tests/
-├── .env.example
 └── docker-compose.yaml                  # Infrastructure setup
 ```
 
