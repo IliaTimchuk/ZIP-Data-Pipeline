@@ -1,48 +1,29 @@
 import io
 import os
-import yaml
 import zipfile
 import pytest
 import pyarrow as pa
 import pyarrow.dataset as pa_dataset
 import settings.pipeline_config as conf
+import pyarrow.fs as fs
 from unittest.mock import patch
-from datetime import datetime, timezone
-from pyarrow.fs import S3FileSystem
 from moto.server import ThreadedMotoServer
 
-from scripts.bronze.bronze_entrypoint import main
-from scripts.utils.build_layer_key import build_bronze_key
+from src.bronze.entrypoint import main
 
 SOURCE_BUCKET = "landing"
 DATASET_NAME = "test-dataset"
-DATASET_SCHEMA = ["id", "name", "score", "is_active"]
+DATASET_SCHEMA = pa.schema(
+    [
+        pa.field("id", pa.string()),
+        pa.field("name", pa.string()),
+        pa.field("balance", pa.string()),
+    ]
+)
 FILE_NAME = "file.zip"
-SOURCE_KEY = f"test_data/{DATASET_NAME}/date=2026-01-01/{FILE_NAME}"
 DESTINATION_BUCKET = "bronze"
-
-
-@pytest.fixture
-def test_zip_file():
-    def _create_zip_file(data: str, zipped_file_name: str):
-        file = io.BytesIO()
-        with zipfile.ZipFile(file, "w", zipfile.ZIP_DEFLATED) as zf:
-            zf.writestr(zipped_file_name, data)
-        file.seek(0)
-        return file
-
-    return _create_zip_file
-
-
-@pytest.fixture
-def test_dataset_schemas_yaml(tmp_path):
-    path = tmp_path / "test_dataset_schemas.yaml"
-    with open(path, "w") as f:
-        yaml.safe_dump(
-            data={DATASET_NAME: {"schema": DATASET_SCHEMA}},
-            stream=f,
-        )
-    return str(path)
+SOURCE_KEY = f"test_data/{DATASET_NAME}/ingest_date=2026-01-01/{FILE_NAME}"
+BRONZE_KEY_BASE = f"{DESTINATION_BUCKET}/test_data/{DATASET_NAME}/ingest_date=2026-01-01/zip_name=file"
 
 
 @pytest.fixture
@@ -63,112 +44,73 @@ def aws_credentials(monkeypatch, moto_server):
 
 
 @pytest.fixture
-def bronze_processed_at():
-    return str(int(datetime.now().timestamp() * 1000))
-
-
-@pytest.fixture
-def bronze_env(monkeypatch, moto_server, bronze_processed_at):
-    monkeypatch.setenv("SOURCE_BUCKET", SOURCE_BUCKET)
-    monkeypatch.setenv("SOURCE_KEY", SOURCE_KEY)
-    monkeypatch.setenv("DESTINATION_BUCKET", DESTINATION_BUCKET)
-    monkeypatch.setenv("DATASET_NAME", DATASET_NAME)
-    monkeypatch.setenv("AWS_ENDPOINT", moto_server)
-    monkeypatch.setenv("_BRONZE_PROCESSED_AT", bronze_processed_at)
-    monkeypatch.setenv("_DAG_RUN_ID", "scheduled__2026-08-20T12:00:00+00:00")
-    monkeypatch.setenv("_ZIP_FILE_NAME", "test_file.zip")
-
-
-@pytest.fixture
-def s3_client(aws_credentials, moto_server):
-    client = S3FileSystem(endpoint_override=moto_server, allow_bucket_creation=True)
+def s3fs(aws_credentials, moto_server):
+    client = fs.S3FileSystem(endpoint_override=moto_server, allow_bucket_creation=True)
     client.create_dir(SOURCE_BUCKET)
     client.create_dir(DESTINATION_BUCKET)
     yield client
 
 
-@pytest.mark.parametrize(
-    "csv_data, expected_prefix, expected_columns, expected_data",
-    [
-        (
-            f"{','.join(DATASET_SCHEMA)}\n1,Alice,85,true\n2,Bob,92,false\n",
-            conf.VERIFIED_PREFIX,
-            {
-                *DATASET_SCHEMA,
-                "_bronze_processed_at",
-                "_dag_run_id",
-                "_zip_file_name",
-                "_source_file_name",
-            },
-            {
-                "id": [1, 2],
-                "name": ["Alice", "Bob"],
-                "score": [85, 92],
-                "is_active": [True, False],
-            },
-        ),
-        (
-            "id,name,wrong_column\n1,Alice,bad\n2,Bob,bad\n",
-            conf.UNVERIFIED_PREFIX,
-            {
-                "id",
-                "name",
-                "wrong_column",
-                "_bronze_processed_at",
-                "_dag_run_id",
-                "_zip_file_name",
-                "_source_file_name",
-            },
-            {
-                "id": [1, 2],
-                "name": ["Alice", "Bob"],
-                "wrong_column": ["bad", "bad"],
-            },
-        ),
-    ],
-    ids=["verified_schema", "unverified_schema"],
+@pytest.fixture
+def bronze_env(monkeypatch, moto_server):
+    monkeypatch.setenv("LANDING_BUCKET", SOURCE_BUCKET)
+    monkeypatch.setenv("LANDING_KEY", SOURCE_KEY)
+    monkeypatch.setenv("DESTINATION_BUCKET", DESTINATION_BUCKET)
+    monkeypatch.setenv("DATASET_NAME", DATASET_NAME)
+    monkeypatch.setenv("AWS_ENDPOINT", moto_server)
+    monkeypatch.setenv("_DAG_RUN_ID", "scheduled__2026-08-20T12:00:00+00:00")
+
+
+@pytest.fixture
+def make_zip():
+    def _make_zip(files: dict[str, str | bytes]) -> bytes:
+        buffer = io.BytesIO()
+        with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as zf:
+            for name, data in files.items():
+                zf.writestr(name, data)
+        return buffer.getvalue()
+
+    return _make_zip
+
+
+@patch.dict(
+    "settings.schemas.bronze_schemas.bronze_schemas", {DATASET_NAME: DATASET_SCHEMA}
 )
-def test_bronze_entrypoint_run(
-    s3_client,
-    bronze_env,
-    test_dataset_schemas_yaml,
-    bronze_processed_at,
-    test_zip_file,
-    csv_data,
-    expected_prefix,
-    expected_columns,
-    expected_data,
-):
-    zip_content = test_zip_file(data=csv_data, zipped_file_name="zipped_file.csv")
-    source_path = f"{SOURCE_BUCKET}/{SOURCE_KEY}"
-
-    with s3_client.open_output_stream(source_path) as stream:
-        stream.write(zip_content.read())
-
-    with patch(
-        "scripts.bronze.bronze_entrypoint.DATASET_SCHEMAS_YAML_PATH",
-        new=test_dataset_schemas_yaml,
-    ):
-        main()
-
-    bronze_key = build_bronze_key(SOURCE_KEY, expected_prefix)
-
-    unarchived_parquet = pa_dataset.dataset(
-        source=f"{DESTINATION_BUCKET}/{bronze_key}",
-        filesystem=s3_client,
-        format="parquet",
+def test_entrypoint_integration(s3fs, make_zip, bronze_env):
+    test_file = make_zip(
+        files={
+            "test.csv": "id,name,balance\n1,Alice,10.5\n2,Bob,20.0\n",
+            "test.json": '[{"id": 3, "name": "Carol"}]',
+        }
     )
-    result = unarchived_parquet.to_table().to_pydict()
 
-    assert set(result.keys()) == expected_columns
-    for key, values in expected_data.items():
-        assert result[key] == values
+    with s3fs.open_output_stream(f"{SOURCE_BUCKET}/{SOURCE_KEY}") as f:
+        f.write(test_file)
 
-    assert result["_source_file_name"] == ["zipped_file.csv", "zipped_file.csv"]
-    assert result["_zip_file_name"] == ["test_file.zip", "test_file.zip"]
-    assert result["_dag_run_id"] == ["scheduled__2026-08-20T12:00:00+00:00"] * 2
+    main()
 
-    expected_timestamp = datetime.fromtimestamp(
-        int(bronze_processed_at) / 1000, tz=timezone.utc
-    )
-    assert result["_bronze_processed_at"] == [expected_timestamp, expected_timestamp]
+    expected_csv_key = f"{BRONZE_KEY_BASE}/schema_status={conf.VALID_PREFIX}/test.csv_part-0.parquet"
+    expected_json_key = f"{BRONZE_KEY_BASE}/schema_status={conf.INVALID_PREFIX}/test.json_part-0.parquet"
+    expected_success_key = f"{BRONZE_KEY_BASE}/{conf.BRONZE_SUCCESS_MARKER}"
+    
+    assert s3fs.get_file_info(expected_csv_key).type == fs.FileType.File
+    assert s3fs.get_file_info(expected_json_key).type == fs.FileType.File
+    assert s3fs.get_file_info(expected_success_key).type == fs.FileType.File
+
+    csv_table = pa_dataset.dataset(expected_csv_key, filesystem=s3fs).to_table()
+
+    assert csv_table.column_names == [
+        "id",
+        "name",
+        "balance",
+        "_bronze_processed_at",
+        "_dag_run_id",
+        "_zip_file_name",
+        "_source_file_name",
+        "_schema_status",
+    ]
+    assert csv_table.column("_dag_run_id").to_pylist() == [
+        "scheduled__2026-08-20T12:00:00+00:00",
+        "scheduled__2026-08-20T12:00:00+00:00",
+    ]
+    assert csv_table.column("_zip_file_name").to_pylist() == ["file.zip", "file.zip"]

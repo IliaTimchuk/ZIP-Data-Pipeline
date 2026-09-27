@@ -2,7 +2,7 @@ import logging
 import pytest
 import yaml
 
-from scripts.ingestion.read_sources import (
+from src.ingestion.read_sources import (
     _validate_source,
     _format_endpoints,
     get_dag_sources,

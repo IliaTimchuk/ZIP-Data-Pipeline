@@ -1,5 +1,6 @@
-pyarrow
-boto3
-mypy_boto3_s3
-stream-unzip
-PyYAML
+pyarrow==25.0.1
+boto3==1.43.103
+mypy_boto3_s3==1.43.93
+stream-unzip==0.0.101
+PyYAML==6.0.3
+python-dotenv==1.2.3
