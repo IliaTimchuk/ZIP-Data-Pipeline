@@ -55,13 +55,13 @@ LANDING_KEY_TEMPLATE = "{source_name}/{dataset_name}/ingest_date={date}/{file_na
 BRONZE_KEY_TEMPLATE = (
     "{source_name}/{dataset_name}/ingest_date={date}/zip_name={zip_stem}"
 )
-BRONZE_VALIDATION_STATUS_KEY_TEMPLATE = (
-    "{bronze_key}/schema_status={validation_status}"
+BRONZE_SCHEMA_STATUS_KEY_TEMPLATE = (
+    "{bronze_key}/schema_status={schema_status}"
 )
 
 # Written to the bronze key of a ZIP once its transformation is fully completed.
 BRONZE_SUCCESS_MARKER = "_SUCCESS"
 
 # Validation prefixes used in Bronze bucket keys. Resolved by schema validation.
-VERIFIED_PREFIX = "verified"
-UNVERIFIED_PREFIX = "unverified"
+VALID_PREFIX = "valid"
+INVALID_PREFIX = "invalid"

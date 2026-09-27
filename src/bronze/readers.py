@@ -77,9 +77,9 @@ def validate_schema(reader: pa.RecordBatchReader, expected_schema: pa.Schema) ->
     actual_schema = reader.schema
 
     if expected_schema.equals(actual_schema):
-        return conf.VERIFIED_PREFIX
+        return conf.VALID_PREFIX
 
-    return conf.UNVERIFIED_PREFIX
+    return conf.INVALID_PREFIX
 
 
 _READERS = {

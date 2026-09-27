@@ -127,4 +127,4 @@ daily_trades:
 
 `read_dataset_schema_from_yaml(file_path, dataset_name)` reads this file and returns the `schema` list for `dataset_name`, raising a `KeyError` if no entry exists for that dataset.
 
-Once the actual schema of an ingested file is known, `resolve_prefix_by_schema(expected_schema, actual_schema)` compares it against the expected schema from `dataset_schemas.yaml`. If the two match exactly (including column order), it returns `conf.VERIFIED_PREFIX`; otherwise it logs a warning with both schemas and returns `conf.UNVERIFIED_PREFIX`. This prefix is typically used to route the file into a verified or unverified location in storage.
+Once the actual schema of an ingested file is known, `resolve_prefix_by_schema(expected_schema, actual_schema)` compares it against the expected schema from `dataset_schemas.yaml`. If the two match exactly (including column order), it returns `conf.VALID_PREFIX`; otherwise it logs a warning with both schemas and returns `conf.INVALID_PREFIX`. This prefix is typically used to route the file into a valid or invalid location in storage.

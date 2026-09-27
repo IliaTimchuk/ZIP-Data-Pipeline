@@ -23,8 +23,8 @@ def build_zip_stream(files: dict[str, str | bytes], chunk_size: int = 16):
 def consume_stream(stream):
     """Consumes the stream and returns a dict {filename: (pyarrow.Table, status)}."""
     return {
-        file_name: (reader.read_all(), validation_status)
-        for file_name, reader, validation_status in stream
+        file_name: (reader.read_all(), schema_status)
+        for file_name, reader, schema_status in stream
     }
 
 
@@ -60,10 +60,10 @@ def test_get_unarchived_stream_dispatches_and_skips():
     for file_name in expected_result_files:
         table, status = results[file_name]
         assert table.to_pydict() == {"id": ["1"]}
-        assert status == conf.VERIFIED_PREFIX
+        assert status == conf.VALID_PREFIX
 
 
-def test_get_unarchived_stream_marks_schema_mismatch_as_unverified():
+def test_get_unarchived_stream_marks_schema_mismatch_as_invalid():
     files = {
         "test.json": '[{"id": 1, "new_col": "data"}]',
         "test.csv": "id,new_col\n1,data\n",
@@ -73,7 +73,7 @@ def test_get_unarchived_stream_marks_schema_mismatch_as_unverified():
     results = consume_stream(unzip.get_unarchived_stream(zip_iter, SCHEMA))
     for file_name in files:
         _, status = results[file_name]
-        assert status == conf.UNVERIFIED_PREFIX
+        assert status == conf.INVALID_PREFIX
 
 
 @pytest.mark.parametrize(
@@ -114,8 +114,8 @@ def test_add_columns_builds_columns_and_appends_them():
     [
         (False, False, ["id", "run_id"]),
         (True, False, ["id", "run_id", "_source_file_name"]),
-        (False, True, ["id", "run_id", "_validation_status"]),
-        (True, True, ["id", "run_id", "_source_file_name", "_validation_status"]),
+        (False, True, ["id", "run_id", "_schema_status"]),
+        (True, True, ["id", "run_id", "_source_file_name", "_schema_status"]),
     ],
     ids=["none", "name_only", "status_only", "both"],
 )
@@ -123,7 +123,7 @@ def test_add_columns_to_unarchived_stream_appends_columns(
     append_name, append_status, expected_cols
 ):
     stream = [
-        ("a.csv", dummy_record_batch_reader(["1", "2"], SCHEMA), conf.VERIFIED_PREFIX)
+        ("a.csv", dummy_record_batch_reader(["1", "2"], SCHEMA), conf.VALID_PREFIX)
     ]
     columns_shape = {"run_id": pa.scalar(1, pa.int16())}
 
@@ -139,8 +139,8 @@ def test_add_columns_to_unarchived_stream_appends_columns(
 
 def test_add_columns_to_unarchived_stream_keeps_values_per_file():
     stream = [
-        ("a.csv", dummy_record_batch_reader(["1"], SCHEMA), conf.VERIFIED_PREFIX),
-        ("b.csv", dummy_record_batch_reader(["2"], SCHEMA), conf.UNVERIFIED_PREFIX),
+        ("a.csv", dummy_record_batch_reader(["1"], SCHEMA), conf.VALID_PREFIX),
+        ("b.csv", dummy_record_batch_reader(["2"], SCHEMA), conf.INVALID_PREFIX),
     ]
     columns_shape = {"run_id": pa.scalar(1, pa.int16())}
 
@@ -151,11 +151,11 @@ def test_add_columns_to_unarchived_stream_keeps_values_per_file():
 
     table_a, _ = results["a.csv"]
     assert table_a.column("_source_file_name").to_pylist() == ["a.csv"]
-    assert table_a.column("_validation_status").to_pylist() == [conf.VERIFIED_PREFIX]
+    assert table_a.column("_schema_status").to_pylist() == [conf.VALID_PREFIX]
 
     table_b, _ = results["b.csv"]
     assert table_b.column("_source_file_name").to_pylist() == ["b.csv"]
-    assert table_b.column("_validation_status").to_pylist() == [conf.UNVERIFIED_PREFIX]
+    assert table_b.column("_schema_status").to_pylist() == [conf.INVALID_PREFIX]
 
 
 def test_add_columns_to_unarchived_stream_does_not_read_ahead():
@@ -166,7 +166,7 @@ def test_add_columns_to_unarchived_stream_does_not_read_ahead():
         yield pa.record_batch({"id": ["1"]}, schema=SCHEMA)
 
     source = pa.RecordBatchReader.from_batches(SCHEMA, batches())
-    stream = [("a.csv", source, conf.VERIFIED_PREFIX)]
+    stream = [("a.csv", source, conf.VALID_PREFIX)]
 
     result_stream = list(unzip.add_columns_to_unarchived_stream(stream, {}))
     assert pulled == []
@@ -222,7 +222,7 @@ def test_upload_unarchived_zip_stream_writes_dataset(tmp_path):
         (
             "folder/data.csv",
             dummy_record_batch_reader(["1", "2"], SCHEMA),
-            conf.VERIFIED_PREFIX,
+            conf.VALID_PREFIX,
         )
     ]
 
@@ -239,7 +239,7 @@ def test_upload_unarchived_zip_stream_writes_dataset(tmp_path):
     assert success_marker.exists()
     assert success_marker.stat().st_size == 0
 
-    dataset_dir = bronze_dir / f"schema_status={conf.VERIFIED_PREFIX}"
+    dataset_dir = bronze_dir / f"schema_status={conf.VALID_PREFIX}"
     assert dataset_dir.exists()
 
     parquet_files = list(dataset_dir.glob("*.parquet"))
@@ -254,10 +254,10 @@ def test_upload_unarchived_zip_stream_rerun_leaves_no_old_files(tmp_path):
     local_fs = fs.LocalFileSystem()
     bucket = str(tmp_path)
     first_run = [
-        ("a.csv", dummy_record_batch_reader(["1"], SCHEMA), conf.VERIFIED_PREFIX)
+        ("a.csv", dummy_record_batch_reader(["1"], SCHEMA), conf.VALID_PREFIX)
     ]
     second_run = [
-        ("a.csv", dummy_record_batch_reader(["1"], SCHEMA), conf.UNVERIFIED_PREFIX)
+        ("a.csv", dummy_record_batch_reader(["1"], SCHEMA), conf.INVALID_PREFIX)
     ]
 
     for stream in [first_run, second_run]:
@@ -271,10 +271,10 @@ def test_upload_unarchived_zip_stream_rerun_leaves_no_old_files(tmp_path):
     bronze_dir = tmp_path / BRONZE_KEY
 
     assert (bronze_dir / conf.BRONZE_SUCCESS_MARKER).exists()
-    assert not (bronze_dir / f"schema_status={conf.VERIFIED_PREFIX}").exists()
+    assert not (bronze_dir / f"schema_status={conf.VALID_PREFIX}").exists()
 
     parquet_files = list(
-        (bronze_dir / f"schema_status={conf.UNVERIFIED_PREFIX}").glob("*.parquet")
+        (bronze_dir / f"schema_status={conf.INVALID_PREFIX}").glob("*.parquet")
     )
     assert len(parquet_files) == 1
 

@@ -10,7 +10,7 @@ import settings.pipeline_config as conf
 import src.bronze.readers as readers
 from src.utils.build_layer_key import (
     build_bronze_key,
-    build_bronze_validation_status_key,
+    build_bronze_schema_status_key,
 )
 from src.bronze.io_wrapper import BytesIteratorIO
 
@@ -44,7 +44,7 @@ def get_unarchived_stream(
             - file_name: the decoded name of the file inside the ZIP archive.
             - record_batch_reader: a RecordBatchReader over each decompressed file.
                 Must be consumed.
-            - validation_status: whether the expected_schema matches the actual file
+            - schema_status: whether the expected_schema matches the actual file
                 schema.
     """
     unzipped_stream = stream_unzip(zip_iterator, chunk_size=unarchived_chunk_size)
@@ -59,10 +59,10 @@ def get_unarchived_stream(
                 file_like_iterator, file_name
             ) as record_batch_reader:
 
-                validation_status = readers.validate_schema(
+                schema_status = readers.validate_schema(
                     record_batch_reader, expected_schema
                 )
-                yield file_name, record_batch_reader, validation_status
+                yield file_name, record_batch_reader, schema_status
 
         except (
             readers.UnsupportedFileExtensionError,
@@ -85,32 +85,32 @@ def add_columns_to_unarchived_stream(
     unarchived_stream: Iterator[tuple[str, int, pa.RecordBatchReader]],
     columns_shape: dict[str, pa.Scalar],
     append_file_name: bool = False,
-    append_file_validation_status: bool = False,
+    append_file_schema_status: bool = False,
 ) -> Iterator[tuple[str, int, pa.RecordBatchReader]]:
     """
     Creates a wrapper to append columns to the unarchived stream, building them
     based on columns_shape.
 
     Args:
-        unarchived_stream: (file_name, record_batch_reader, validation_status)
+        unarchived_stream: (file_name, record_batch_reader, schema_status)
             tuples.
         columns_shape: the dictionary {column_name: pyarrow.scalar} that is used
             to build columns.
         append_file_name: wheter to append a _source_file_name column containing
             the name of the source file.
-        append_file_validation_status: whether to append a schema validation status
+        append_file_schema_status: whether to append a schema validation status
             column.
     """
-    for file_name, record_batch_reader, validation_status in unarchived_stream:
+    for file_name, record_batch_reader, schema_status in unarchived_stream:
         current_schema = record_batch_reader.schema
         columns_shape_copy = columns_shape.copy()
 
         if append_file_name:
             columns_shape_copy["_source_file_name"] = pa.scalar(file_name, pa.string())
 
-        if append_file_validation_status:
-            columns_shape_copy["_validation_status"] = pa.scalar(
-                validation_status, pa.string()
+        if append_file_schema_status:
+            columns_shape_copy["_schema_status"] = pa.scalar(
+                schema_status, pa.string()
             )
 
         new_schema = pa.schema(
@@ -128,7 +128,7 @@ def add_columns_to_unarchived_stream(
         reader_with_metadata = pa.RecordBatchReader.from_batches(
             schema=new_schema, batches=batches_gen
         )
-        yield file_name, reader_with_metadata, validation_status
+        yield file_name, reader_with_metadata, schema_status
 
 
 def _clean_bronze_key(s3fs: fs.S3FileSystem, bronze_key: str) -> None:
@@ -175,9 +175,9 @@ def upload_unarchived_zip_stream_to_s3(
 
     uploaded_files_count = 0
 
-    for file_name, record_batch_reader, validation_status in unarchived_stream:
+    for file_name, record_batch_reader, schema_status in unarchived_stream:
         flat_file_name = file_name.replace("/", "__")
-        key = f"{bucket}/{build_bronze_validation_status_key(source_key, validation_status)}"
+        key = f"{bucket}/{build_bronze_schema_status_key(source_key, schema_status)}"
 
         pa_dataset.write_dataset(
             data=record_batch_reader,

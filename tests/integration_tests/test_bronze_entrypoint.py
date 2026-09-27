@@ -89,8 +89,8 @@ def test_entrypoint_integration(s3fs, make_zip, bronze_env):
 
     main()
 
-    expected_csv_key = f"{BRONZE_KEY_BASE}/schema_status={conf.VERIFIED_PREFIX}/test.csv_part-0.parquet"
-    expected_json_key = f"{BRONZE_KEY_BASE}/schema_status={conf.UNVERIFIED_PREFIX}/test.json_part-0.parquet"
+    expected_csv_key = f"{BRONZE_KEY_BASE}/schema_status={conf.VALID_PREFIX}/test.csv_part-0.parquet"
+    expected_json_key = f"{BRONZE_KEY_BASE}/schema_status={conf.INVALID_PREFIX}/test.json_part-0.parquet"
     expected_success_key = f"{BRONZE_KEY_BASE}/{conf.BRONZE_SUCCESS_MARKER}"
     
     assert s3fs.get_file_info(expected_csv_key).type == fs.FileType.File
@@ -107,7 +107,7 @@ def test_entrypoint_integration(s3fs, make_zip, bronze_env):
         "_dag_run_id",
         "_zip_file_name",
         "_source_file_name",
-        "_validation_status",
+        "_schema_status",
     ]
     assert csv_table.column("_dag_run_id").to_pylist() == [
         "scheduled__2026-08-20T12:00:00+00:00",

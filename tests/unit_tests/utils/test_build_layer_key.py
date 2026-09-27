@@ -7,12 +7,12 @@ ARCHIVE_NAME = "test_file.zip"
 ARCHIVE_STEM = "test_file"
 DATASET_NAME = "test_dataset"
 DATE = "2020-01-01"
-VALIDATION_STATUS = "verified"
+SCHEMA_STATUS = "valid"
 
 SOURCE_KEY = f"test/source/key/{ARCHIVE_NAME}"
 LANDING_KEY = f"{SOURCE_NAME}/{DATASET_NAME}/ingest_date={DATE}/{ARCHIVE_NAME}"
 BRONZE_KEY = f"{SOURCE_NAME}/{DATASET_NAME}/ingest_date={DATE}/zip_name={ARCHIVE_STEM}"
-BRONZE_VALIDATION_STATUS_KEY = f"{BRONZE_KEY}/schema_status={VALIDATION_STATUS}"
+BRONZE_SCHEMA_STATUS_KEY = f"{BRONZE_KEY}/schema_status={SCHEMA_STATUS}"
 
 
 def test_build_landing_key():
@@ -29,6 +29,6 @@ def test_build_bronze_key():
     assert key.build_bronze_key(LANDING_KEY) == BRONZE_KEY
 
 
-def test_build_bronze_validation_status_key():
-    test_key = key.build_bronze_validation_status_key(LANDING_KEY, VALIDATION_STATUS)
-    assert test_key == BRONZE_VALIDATION_STATUS_KEY
+def test_build_bronze_schema_status_key():
+    test_key = key.build_bronze_schema_status_key(LANDING_KEY, SCHEMA_STATUS)
+    assert test_key == BRONZE_SCHEMA_STATUS_KEY

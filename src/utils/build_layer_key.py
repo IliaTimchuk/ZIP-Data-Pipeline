@@ -36,15 +36,15 @@ def build_bronze_key(landing_key: str) -> str:
     )
 
 
-def build_bronze_validation_status_key(
-    landing_key: str, validation_status: str
+def build_bronze_schema_status_key(
+    landing_key: str, schema_status: str
 ) -> str:
     """
     Builds the key for the files of a ZIP with the given validation status,
-    based on the BRONZE_VALIDATION_STATUS_KEY_TEMPLATE:
-        {bronze_key}/schema_status={validation_status}
+    based on the BRONZE_SCHEMA_STATUS_KEY_TEMPLATE:
+        {bronze_key}/schema_status={schema_status}
     """
-    return conf.BRONZE_VALIDATION_STATUS_KEY_TEMPLATE.format(
+    return conf.BRONZE_SCHEMA_STATUS_KEY_TEMPLATE.format(
         bronze_key=build_bronze_key(landing_key),
-        validation_status=validation_status,
+        schema_status=schema_status,
     )

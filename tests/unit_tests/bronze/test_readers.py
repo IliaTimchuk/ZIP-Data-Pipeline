@@ -194,7 +194,7 @@ def test_open_file_like_handles_extension_casing(file_name):
 # validate_schema
 
 
-def test_validate_schema_returns_verified_on_match():
+def test_validate_schema_returns_valid_on_match():
     actual_schema = pa.schema([pa.field("user_id", pa.int64())])
     expected_schema = pa.schema([pa.field("user_id", pa.int64())])
 
@@ -203,10 +203,10 @@ def test_validate_schema_returns_verified_on_match():
 
     result = readers.validate_schema(mock_reader, expected_schema)
 
-    assert result == conf.VERIFIED_PREFIX
+    assert result == conf.VALID_PREFIX
 
 
-def test_validate_schema_returns_unverified_on_mismatch():
+def test_validate_schema_returns_invalid_on_mismatch():
     actual_schema = pa.schema([pa.field("user_id", pa.int64())])
     expected_schema = pa.schema([pa.field("user_id", pa.string())])
 
@@ -215,4 +215,4 @@ def test_validate_schema_returns_unverified_on_mismatch():
 
     result = readers.validate_schema(mock_reader, expected_schema)
 
-    assert result == conf.UNVERIFIED_PREFIX
+    assert result == conf.INVALID_PREFIX
