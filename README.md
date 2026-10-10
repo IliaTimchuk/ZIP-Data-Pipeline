@@ -3,12 +3,14 @@
 | :--- | :--- |
 | **Build & DevOps** | [![CI](https://github.com/IliaTimchuk/ZIP-Data-Pipeline/actions/workflows/ci.yaml/badge.svg)](https://github.com/IliaTimchuk/ZIP-Data-Pipeline/actions/workflows/ci.yaml) ![Docker](https://img.shields.io/badge/Docker-2496ED?logo=docker&logoColor=white) ![Pytest](https://img.shields.io/badge/Pytest-9.1.1-%230A9EDC?logo=pytest) |
 | **Orchestration & Compute** | ![Apache Airflow](https://img.shields.io/badge/Airflow-3.2.0-%230374B5) ![PySpark](https://img.shields.io/badge/PySpark-3.5.9-E25A1C?logo=apachespark&logoColor=white) ![PyArrow](https://img.shields.io/badge/PyArrow-25.0.1-%23121212?logo=apachearrow) |
-| **Storage** | ![MinIO](https://img.shields.io/badge/MinIO-Community_Edition-%23C72E49?logo=minio) ![Apache Iceberg](https://img.shields.io/badge/Apache_Iceberg-1.11.0-%232B7DC0) |
+| **Storage** | ![MinIO](https://img.shields.io/badge/MinIO-Community_Edition-%23C72E49?logo=minio) ![Apache Iceberg](https://img.shields.io/badge/Apache_Iceberg-1.11.0-%232B7DC0) ![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16.13-%234169E1?logo=postgresql&logoColor=%23FFFFFF)|
 | **Analytics Engine** | ![ClickHouse](https://img.shields.io/badge/ClickHouse-26.9.2.8-%23FFCC01?logo=clickhouse) |
 
 <p>ZIP-Data-Pipeline is an end-to-end ELT pipeline that turns ZIP archives from external S3 buckets into analytics-ready data marts in ClickHouse through a layered data lakehouse architecture.</p>
 
 ![The ZIP-Data-Pipeline architecture](./docs/images/architecture-overview.svg)
+
+<p>The published version of ZIP-Data-Pipeline is built around a <a href="./docs/business_case.md">business case</a> of a pharmaceutical manufacturer that receives daily sales and stock data from its partner.</p>
 
 ## **Why this project exists**
 <p>ZIP archives are one of the most common ways to publish bulk data and one of the least convenient to process. They cannot be split for parallel processing, their file index sits at the end of the archive, and one archive often contains different file formats.</p>
@@ -26,7 +28,7 @@
 ## **Workflow and main engineering decisions**
 
 ### **Ingestion**
-The ingestion layer is represented by the <code>[ingest_from_s3](airflow/dags/ingestion.py)</code> DAG that extracts data from S3 buckets daily and saves it to the MinIO Landing bucket.
+The ingestion layer of the ZIP path is represented by the <code>[ingest_from_s3](airflow/dags/ingestion.py)</code> DAG that extracts data from S3 buckets daily and saves it to the MinIO Landing bucket.
 
 ![ingest_from_s3 architecture](./docs/images/ingest_from_s3-architecture.svg)
 
@@ -44,7 +46,7 @@ The ingestion layer is represented by the <code>[ingest_from_s3](airflow/dags/in
 <div style="height: 16px;"></div>
 
 ### **Bronze**
-<p>The Bronze layer turns each landed ZIP into validated Parquet files in the Bronze bucket.</p>
+<p>In the ZIP path, the Bronze layer turns each landed ZIP into validated Parquet files in the Bronze bucket.</p>
 <p>The Bronze DAG is triggered by Landing asset events and starts one Docker container per landed ZIP. Inside each container, the ZIP goes through the <a href="./src/bronze/">Bronze Transformation</a>: it is streamed from the landing bucket, decompressed file by file, checked against the expected schema, enriched with lineage columns and written to Bronze as Parquet.</p>
 
 ![Bronze Architecture](./docs/images/bronze-architecture.svg)
