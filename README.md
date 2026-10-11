@@ -47,7 +47,7 @@ The ingestion layer of the ZIP path is represented by the <code>[ingest_from_s3]
 
 ### **Bronze**
 <p>In the ZIP path, the Bronze layer turns each landed ZIP into validated Parquet files in the Bronze bucket.</p>
-<p>The Bronze DAG is triggered by Landing asset events and starts one Docker container per landed ZIP. Inside each container, the ZIP goes through the <a href="./src/bronze/">Bronze Transformation</a>: it is streamed from the landing bucket, decompressed file by file, checked against the expected schema, enriched with lineage columns and written to Bronze as Parquet.</p>
+<p>The Bronze DAG is triggered by Landing asset events and starts one Docker container per landed ZIP. Inside each container, the ZIP goes through the transformation: it is streamed from the landing bucket, decompressed file by file, checked against the expected schema, enriched with lineage columns and written to Bronze as Parquet.</p>
 
 ![Bronze Architecture](./docs/images/bronze-architecture.svg)
 
@@ -55,7 +55,8 @@ The ingestion layer of the ZIP path is represented by the <code>[ingest_from_s3]
 | --- | --- |
 | Each ZIP is streamed from S3 and decompressed file by file in chunks with PyArrow, in its own Docker container instead of Spark. | ZIP files are unsplittable, so Spark cannot process one archive in parallel. One lightweight container per ZIP gives parallelism across archives without Spark's overhead, and streaming keeps memory use independent of the archive size. |
 | All CSV data and JSON numeric data are read as strings. | Keeping data as strings avoids type inference losing data. If a cast rule changes, Silver can re-cast from Bronze without decompressing the ZIP archives again. |
-| Each file is validated against the expected schema and written under `schema_status=valid` or `schema_status=invalid`. Invalid files are kept in quarantine instead of being dropped, and an alert is sent for them. | Silver and Gold expect an exact schema. A mismatching file could fail their jobs or be processed silently and put wrong data into the data marts. Quarantine keeps such files out of the valid path, loses no data, and lets them be reprocessed once the schema is updated. |
+| Each file is validated against the expected schema and written under `schema_status=valid` or `schema_status=invalid`. Invalid files are kept in quarantine instead of being dropped. Airflow sends alerts for all invalid files. | Silver and Gold expect an exact schema. A mismatching file could fail their jobs or be processed silently and put wrong data into the data marts. Quarantine keeps such files out of the valid path, loses no data, and lets them be reprocessed once the schema is updated. |
+| Bronze keys are partitioned as:<br>`source/dataset/ingest_date=.../zip_name=.../`<br>`schema_status=.../{file_name}_part-*.parquet` | All the output of one ZIP archive lives under its own `zip_name=...` key, so it can be cleaned and marked as complete without touching other archives. Silver can read the valid files of a dataset for a given date by partition. |
 | The key of the ZIP archive within the destination bucket is cleaned before writing the data. | Re-runs of the transformation never duplicate data. |
 | A `_SUCCESS` marker is written under the key of the ZIP archive as the last step of the transformation. | The marker confirms that the transformation of the entire archive was completed. If the transformation is interrupted, the marker is never written, so Silver can distinguish complete ZIP archives from partial ones. |
 | Lineage columns are added to every row: DAG run id, processing time, ZIP name, source file name and schema status. | Every row can be traced back to its archive, file and pipeline run. |
@@ -85,6 +86,9 @@ Spark handles Apache Iceberg tables from the Silver bucket, builds data marts us
 │   │   └── ingestion.py                 # Ingestion DAG
 │   └── logs/
 ├── docker/                              # Custom Dockerfiles and image requirements
+├── docs/
+│   ├── images/                          # README diagrams
+│   └── business_case.md                 # Business case behind Silver and Gold
 ├── settings/
 │   ├── schemas/
 │   │   └── bronze_schemas.py            # Bronze layer schema definitions

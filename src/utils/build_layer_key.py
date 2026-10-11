@@ -4,7 +4,7 @@ import settings.pipeline_config as conf
 
 def build_landing_key(source_name: str, source_key: str, dataset_name: str, date: str):
     """
-    Builds a bronze key based on the LANDING_KEY_TEMPLATE from
+    Builds a landing key based on the LANDING_KEY_TEMPLATE from
     settings/pipeline_config.py. Uses the last part of the key as
     the file name.
     """

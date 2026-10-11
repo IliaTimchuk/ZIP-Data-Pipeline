@@ -56,8 +56,8 @@ def open_string_json(json_iterator: IO[bytes]) -> pa.RecordBatchReader:
 
 def open_string_csv(file_source: IO[bytes]) -> pa.RecordBatchReader:
     """
-    Opens a streaming reader of CSV data using configured pyarrow.csv.open_csv
-    fucntion. All unexpected columns default to strings.
+    Opens a streaming reader of CSV data using the configured pyarrow.csv.open_csv
+    function. All columns are read as strings.
 
     pyarrow.csv.open_csv: https://arrow.apache.org/docs/python/generated/pyarrow.csv.open_csv.html
     """

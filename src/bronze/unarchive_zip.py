@@ -21,7 +21,7 @@ def get_unarchived_stream(
     zip_iterator: Iterator[bytes],
     expected_schema: pa.Schema,
     unarchived_chunk_size: int = 16 * 1024 * 1024,
-) -> Iterator[tuple[str, int, pa.RecordBatchReader]]:
+) -> Iterator[tuple[str, pa.RecordBatchReader, str]]:
     """
     Initializes an unarchived stream, creating a wrapper around a ZIP
     iterator that unarchives files inside the ZIP archive in chunks.
@@ -29,8 +29,8 @@ def get_unarchived_stream(
     Processes a ZIP archive in chunks without loading the full archive into
     memory. Each decompressed file is converted to a file-like stream, validated
     against the expected PyArrow schema, and converted into a RecordBatchReader.
-    Files with unsupported extensions are skipped. Currently, supported files
-    are CSV and JSON.
+    Files with unsupported extensions and files without data are skipped.
+    Currently, supported files are CSV and JSON.
 
     Args:
         zip_iterator: the iterator over a ZIP file.
@@ -38,7 +38,7 @@ def get_unarchived_stream(
             files against.
         unarchived_chunk_size: how many bytes to fetch from zip_iterator before
             attempting to process them.
-     Yields:
+    Yields:
         tuple[str, pa.RecordBatchReader, str]: for each file inside the ZIP,
             a tuple of:
             - file_name: the decoded name of the file inside the ZIP archive.
@@ -73,7 +73,7 @@ def get_unarchived_stream(
 
 
 def _add_columns(chunk: pa.RecordBatch, columns_template: dict[str, pa.Scalar]):
-    """Creates columns from columns_shape and appends them to the batch"""
+    """Creates columns from columns_template and appends them to the batch."""
     n = chunk.num_rows
     for column_name, column_value in columns_template.items():
         column_data = pa.repeat(column_value, n)
@@ -82,11 +82,11 @@ def _add_columns(chunk: pa.RecordBatch, columns_template: dict[str, pa.Scalar]):
 
 
 def add_columns_to_unarchived_stream(
-    unarchived_stream: Iterator[tuple[str, int, pa.RecordBatchReader]],
+    unarchived_stream: Iterator[tuple[str, pa.RecordBatchReader, str]],
     columns_shape: dict[str, pa.Scalar],
     append_file_name: bool = False,
     append_file_schema_status: bool = False,
-) -> Iterator[tuple[str, int, pa.RecordBatchReader]]:
+) -> Iterator[tuple[str, pa.RecordBatchReader, str]]:
     """
     Creates a wrapper to append columns to the unarchived stream, building them
     based on columns_shape.
@@ -96,10 +96,10 @@ def add_columns_to_unarchived_stream(
             tuples.
         columns_shape: the dictionary {column_name: pyarrow.scalar} that is used
             to build columns.
-        append_file_name: wheter to append a _source_file_name column containing
+        append_file_name: whether to append a _source_file_name column containing
             the name of the source file.
         append_file_schema_status: whether to append a schema validation status
-            column.
+            column named _schema_status.
     """
     for file_name, record_batch_reader, schema_status in unarchived_stream:
         current_schema = record_batch_reader.schema
@@ -148,7 +148,7 @@ def _clean_bronze_key(s3fs: fs.S3FileSystem, bronze_key: str) -> None:
 
 
 def upload_unarchived_zip_stream_to_s3(
-    unarchived_stream: Iterator[tuple[str, int, pa.RecordBatchReader]],
+    unarchived_stream: Iterator[tuple[str, pa.RecordBatchReader, str]],
     s3fs: fs.S3FileSystem,
     bucket: str,
     source_key: str,

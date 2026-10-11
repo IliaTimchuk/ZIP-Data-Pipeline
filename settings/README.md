@@ -32,7 +32,7 @@ source_name:
 | **`base_url`** | `string` | Required | The root URL/URI. This is prepended to every resolved endpoint to build the final path. Must contain a scheme (e.g., `s3://`, `http://`, `https://`). Each DAG restricts which URL schemes it accepts (e.g. an S3-ingestion DAG may only allow `s3://`). If a source's `base_url` scheme isn't in the calling DAG's allowed list, the source fails structural validation — even if the URL is otherwise well-formed. |
 | **`airflow_conn`** | `string` | Optional | Name of an Airflow Connection used to resolve credentials (e.g., AWS keys, basic auth). If omitted, the source is assumed to require no authentication. |
 | **`dag_ids`** | `list[str]` | Optional | The DAGs permitted to use this source. If omitted or empty, the source is never attached to any DAG. A single source can feed multiple DAGs independently.  |
-| **`endpoints`** | `list[str]` | Required | 	A list of endpoint definitions. Each entry is a dict with a path template (appended to base_url) and a dataset_name template used to label the resolved dataset. Both path and dataset_name may contain `{keyword}` segments. An endpoint missing either key fails validation.|
+| **`endpoints`** | `list[dict]` | Required | A list of endpoint definitions. Each entry is a dict with a path template (appended to base_url) and a dataset_name template used to label the resolved dataset. Both path and dataset_name may contain `{keyword}` segments. An endpoint missing either key fails validation.|
 | **`keywords`** | `dict` | Optional | A mapping of string lists used to populate `{keyword}` segments in the endpoints. |
 
 ## Endpoint and Keyword Resolution
@@ -118,13 +118,19 @@ Source resolution is **DAG-scoped** and performed in a **single pass** using the
 
 # How to define and validate dataset schemas?
 
-The `dataset_schemas.yaml` file holds the expected column schema for each dataset produced by a source. Each top-level key is a `dataset_name` (matching the `dataset_name` resolved from a source's `endpoints` in `sources.yaml`), and its value is a mapping with a single `schema` field listing the expected column names, in order. It must not contain metadata columns, that are added in bronze. This should contain only the columns present in the raw source data - metadata columns added later during the bronze transformation  must not be included here.
+The [`bronze_schemas.py`](schemas/bronze_schemas.py) file holds the expected schema for each dataset produced by a source. Each key of the `bronze_schemas` dictionary is a `dataset_name` (matching the `dataset_name` resolved from a source's `endpoints` in `sources.yaml`), and its value is a `pyarrow.Schema` listing the expected columns in order. All columns are strings, because bronze reads all CSV data and JSON numbers as text. The schema must contain only the columns present in the raw source data - metadata columns added later during the bronze transformation must not be included here.
 
-```yaml
-daily_trades:
-  schema: ["id", "price", "qty", "quote_qty", "time", "is_buyer_maker"]
+```python
+bronze_schemas = {
+    "daily_trades": pa.schema([
+        ("id", pa.string()),
+        ("price", pa.string()),
+        ("qty", pa.string()),
+        ("quote_qty", pa.string()),
+        ("time", pa.string()),
+        ("is_buyer_maker", pa.string())
+    ])
+}
 ```
 
-`read_dataset_schema_from_yaml(file_path, dataset_name)` reads this file and returns the `schema` list for `dataset_name`, raising a `KeyError` if no entry exists for that dataset.
-
-Once the actual schema of an ingested file is known, `resolve_prefix_by_schema(expected_schema, actual_schema)` compares it against the expected schema from `dataset_schemas.yaml`. If the two match exactly (including column order), it returns `conf.VALID_PREFIX`; otherwise it logs a warning with both schemas and returns `conf.INVALID_PREFIX`. This prefix is typically used to route the file into a valid or invalid location in storage.
+The bronze entrypoint takes the expected schema by the `dataset_name` of the ZIP, raising a `KeyError` if no entry exists for that dataset. For each file in the ZIP, `validate_schema(reader, expected_schema)` compares the schema of the file with the expected schema. If the two match exactly (including column order), it returns `conf.VALID_PREFIX`; otherwise it returns `conf.INVALID_PREFIX`. This prefix routes the file into the valid or invalid location in the Bronze bucket.

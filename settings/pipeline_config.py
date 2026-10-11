@@ -21,18 +21,15 @@ AWS_CONN_NAME = "aws_conn"
 # The connection that will be used to reach public buckets.
 AWS_ANONYMOUS_CONN_NAME = "aws_anonymous_conn"
 
-# The path to the source source.yaml and dataset_schemas.yaml files.
+# The path to the sources.yaml file.
 SOURCES_YAML_PATH = "./settings/sources.yaml"
 
 
 # BRONZE CONFIGURATIONS
-# The DAG that will be triggered in the ingestion_from_s3 DAG once the data arrived to the landing bucket.
-BRONZE_DAG_ID = "bronze_transformation_zip_to_parquet"
-
-# The bronze entypoint module.
+# The bronze entrypoint module.
 BRONZE_ENTRYPOINT_MODULE = "src.bronze.entrypoint"
 
-# The max size in bytes for the each decompressed JSON, -1 unlimited.
+# The max size in bytes of each decompressed JSON file.
 MAX_JSON_SIZE_BYTES = 8 * 1024 * 1024
 
 # The Parquet layout of the bronze files, tuned for the Spark silver layer:

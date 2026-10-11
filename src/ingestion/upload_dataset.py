@@ -72,6 +72,7 @@ def validate_file_size(s3_client: S3Client, bucket: str, key: str, expected_size
         s3_client: An instance of boto3 S3 client to perform the check.
         bucket: Name of the S3 bucket where the file is stored.
         key: Key (path) under which the file is stored in the bucket.
+        expected_size: The size in bytes of the object on the source platform.
 
     Raises:
         IOError: If the actual size does not match the expected size,
