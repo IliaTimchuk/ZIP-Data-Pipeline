@@ -7,7 +7,7 @@
       &airflow-common-env
       AIRFLOW__CORE__EXECUTOR: LocalExecutor
       AIRFLOW__CORE__AUTH_MANAGER: airflow.providers.fab.auth_manager.fab_auth_manager.FabAuthManager
-      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://${POSTGRES_USERNAME}:${POSTGRES_PASSWORD}@postgres/${POSTGRES_DB}
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://${POSTGRES_USERNAME}:${POSTGRES_PASSWORD}@airflow-metadata-db/${POSTGRES_DB}
       AIRFLOW__CORE__FERNET_KEY: ${FERNET_KEY}
       AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: 'true'
       AIRFLOW__CORE__LOAD_EXAMPLES: 'false'
@@ -27,7 +27,7 @@
     user: "${AIRFLOW_UID:-50000}:0"
     depends_on:
       &airflow-common-depends-on
-      postgres:
+      airflow-metadata-db:
         condition: service_healthy
 
   x-spark-common:
@@ -38,16 +38,33 @@
       - ./src/spark_jobs:/opt/spark/jobs
 
   services:
-    postgres:
+    airflow-metadata-db:
       image: postgres:16
       environment:
         POSTGRES_USER: ${POSTGRES_USERNAME}
         POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
         POSTGRES_DB: ${POSTGRES_DB}
       volumes:
-        - postgres-db-volume:/var/lib/postgresql/data
+        - airflow-metadata-db-data:/var/lib/postgresql/data
       healthcheck:
         test: ["CMD", "pg_isready", "-U", "${POSTGRES_USERNAME}", "-d", "${POSTGRES_DB}"]
+        interval: 10s
+        retries: 5
+        start_period: 5s
+      restart: always
+
+    erp-db:
+      image: postgres:16
+      environment:
+        POSTGRES_USER: ${ERP_DB_USERNAME}
+        POSTGRES_PASSWORD: ${ERP_DB_PASSWORD}
+        POSTGRES_DB: ${ERP_DB_NAME}
+      volumes:
+        - erp-db-data:/var/lib/postgresql/data
+      ports:
+        - "5433:5432"
+      healthcheck:
+        test: ["CMD", "pg_isready", "-U", "${ERP_DB_USERNAME}", "-d", "${ERP_DB_NAME}"]
         interval: 10s
         retries: 5
         start_period: 5s
@@ -185,7 +202,7 @@
         dockerfile: docker/pyarrow/Dockerfile
       image: pyarrow-custom
     
-    postgres-test:
+    airflow-metadata-db-test:
       image: postgres:16
       environment:
         POSTGRES_USER: ${POSTGRES_USERNAME}
@@ -206,7 +223,7 @@
       user: "0:0"
       environment:
         <<: *airflow-common-env
-        AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://${POSTGRES_USERNAME}:${POSTGRES_PASSWORD}@postgres-test/airflow_test
+        AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://${POSTGRES_USERNAME}:${POSTGRES_PASSWORD}@airflow-metadata-db-test/airflow_test
         _AIRFLOW_DB_MIGRATE: 'true'
       command: ["python", "-m", "pytest", "-vv", "/opt/airflow/tests"]
       volumes:
@@ -217,7 +234,7 @@
         - ${AIRFLOW_PROJ_DIR:-.}/settings:/opt/airflow/settings 
         - ${AIRFLOW_PROJ_DIR:-.}/tests/dag_tests:/opt/airflow/tests
       depends_on:
-        postgres-test:
+        airflow-metadata-db-test:
           condition: service_healthy
       
     python-test:
@@ -231,7 +248,8 @@
         - ./tests/integration_tests:/include/tests/integration_tests
           
   volumes:
-    postgres-db-volume:
+    airflow-metadata-db-data:
+    erp-db-data:
 
   networks:
     default:
