@@ -61,6 +61,7 @@
         POSTGRES_DB: ${ERP_DB_NAME}
       volumes:
         - erp-db-data:/var/lib/postgresql/data
+        - ./erp/ddl:/docker-entrypoint-initdb.d:ro
       ports:
         - "5433:5432"
       healthcheck:
