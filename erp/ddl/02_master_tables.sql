@@ -9,7 +9,7 @@ CREATE TABLE erp.region (
 );
 
 CREATE TRIGGER region_set_updated_at 
-    BEFORE UPDATE on erp.region
+    BEFORE UPDATE ON erp.region
     FOR EACH ROW EXECUTE FUNCTION erp.set_updated_at();
 
 
@@ -43,7 +43,7 @@ CREATE TABLE erp.customer (
 CREATE INDEX customer_billing_address_id_index ON erp.customer (billing_address_id);
 
 CREATE TRIGGER customer_set_updated_at
-    BEFORE UPDATE on erp.customer
+    BEFORE UPDATE ON erp.customer
     FOR EACH ROW EXECUTE FUNCTION erp.set_updated_at();
 
 
@@ -65,7 +65,7 @@ CREATE TABLE erp.customer_warehouse (
 CREATE INDEX customer_warehouse_address_id_index ON erp.customer_warehouse (address_id);
 
 CREATE TRIGGER customer_warehouse_set_updated_at
-    BEFORE UPDATE on erp.customer_warehouse
+    BEFORE UPDATE ON erp.customer_warehouse
     FOR EACH ROW EXECUTE FUNCTION erp.set_updated_at();
 
 
@@ -81,7 +81,7 @@ CREATE TABLE erp.manufacturer_warehouse (
 CREATE INDEX manufacturer_warehouse_address_id_index ON erp.manufacturer_warehouse (address_id);
 
 CREATE TRIGGER manufacturer_warehouse_set_updated_at
-    BEFORE UPDATE on erp.manufacturer_warehouse
+    BEFORE UPDATE ON erp.manufacturer_warehouse
     FOR EACH ROW EXECUTE FUNCTION erp.set_updated_at();
 
 
@@ -93,7 +93,7 @@ CREATE TABLE erp.brand (
 );
 
 CREATE TRIGGER brand_set_updated_at
-    BEFORE UPDATE on erp.brand
+    BEFORE UPDATE ON erp.brand
     FOR EACH ROW EXECUTE FUNCTION erp.set_updated_at();
 
 
@@ -106,7 +106,7 @@ CREATE TABLE erp.dosage_form (
 );
 
 CREATE TRIGGER dosage_form_set_updated_at
-    BEFORE UPDATE on erp.dosage_form
+    BEFORE UPDATE ON erp.dosage_form
     FOR EACH ROW EXECUTE FUNCTION erp.set_updated_at();
 
 
@@ -132,7 +132,7 @@ CREATE INDEX product_brand_id_index ON erp.product (brand_id);
 CREATE INDEX product_dosage_form_id_index ON erp.product (dosage_form_id);
 
 CREATE TRIGGER product_set_updated_at
-    BEFORE UPDATE on erp.product
+    BEFORE UPDATE ON erp.product
     FOR EACH ROW EXECUTE FUNCTION erp.set_updated_at();
 
 

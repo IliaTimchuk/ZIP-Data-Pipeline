@@ -89,6 +89,9 @@ Spark handles Apache Iceberg tables from the Silver bucket, builds data marts us
 ├── docs/
 │   ├── images/                          # README diagrams
 │   └── business_case.md                 # Business case behind Silver and Gold
+├── erp/
+│   ├── ddl/                             # ERP database schema, run at the first start
+│   └── README.md
 ├── settings/
 │   ├── schemas/
 │   │   └── bronze_schemas.py            # Bronze layer schema definitions
@@ -123,4 +126,5 @@ Spark handles Apache Iceberg tables from the Silver bucket, builds data marts us
 | MinIO Console | `http://localhost:9002` | `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` |
 | Spark Master UI | `http://localhost:8090` | — |
 | Spark History Server | `http://localhost:18080` | — |
+| ERP Postgres | `localhost:5433` | `ERP_DB_USERNAME` / `ERP_DB_PASSWORD` |
 

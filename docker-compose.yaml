@@ -53,24 +53,6 @@
         start_period: 5s
       restart: always
 
-    erp-db:
-      image: postgres:16
-      environment:
-        POSTGRES_USER: ${ERP_DB_USERNAME}
-        POSTGRES_PASSWORD: ${ERP_DB_PASSWORD}
-        POSTGRES_DB: ${ERP_DB_NAME}
-      volumes:
-        - erp-db-data:/var/lib/postgresql/data
-        - ./erp/ddl:/docker-entrypoint-initdb.d:ro
-      ports:
-        - "5433:5432"
-      healthcheck:
-        test: ["CMD", "pg_isready", "-U", "${ERP_DB_USERNAME}", "-d", "${ERP_DB_NAME}"]
-        interval: 10s
-        retries: 5
-        start_period: 5s
-      restart: always
-
     airflow-apiserver:
       <<: *airflow-common
       command: api-server
@@ -163,6 +145,24 @@
       depends_on:
         minio:
           condition: service_healthy
+
+    erp-db:
+      image: postgres:16
+      environment:
+        POSTGRES_USER: ${ERP_DB_USERNAME}
+        POSTGRES_PASSWORD: ${ERP_DB_PASSWORD}
+        POSTGRES_DB: ${ERP_DB_NAME}
+      volumes:
+        - erp-db-data:/var/lib/postgresql/databusiness_case.md
+        - ./erp/ddl:/docker-entrypoint-initdb.d:ro
+      ports:
+        - "5433:5432"
+      healthcheck:
+        test: ["CMD", "pg_isready", "-U", "${ERP_DB_USERNAME}", "-d", "${ERP_DB_NAME}"]
+        interval: 10s
+        retries: 5
+        start_period: 5s
+      restart: always
 
     spark-master:
       <<: *spark-common
